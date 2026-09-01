@@ -1,0 +1,3 @@
+# weather-vane materials
+newmtl weather-vane-diffuse
+map_Kd weather-vane-diffuse.png

@@ -1,0 +1,3 @@
+# banner materials
+newmtl banner-diffuse
+map_Kd banner-diffuse.png

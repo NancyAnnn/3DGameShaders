@@ -1,0 +1,3 @@
+# shutters materials
+newmtl house-front-door-diffuse
+map_Kd house-front-door-diffuse.png
