@@ -32,6 +32,34 @@ Shader "Hidden/3DGameShaders/PostProcessing"
         _UseFilmGrain   ("Film Grain",      Float) = 0
         _FilmGrainAmount ("Film Grain Amount", Range(0, 0.1)) = 0.01
 
+        _UseSSAO        ("SSAO",            Float) = 0
+        _SSAOIntensity  ("SSAO Intensity",  Range(0, 3)) = 1.0
+        _SSAORadius     ("SSAO Radius",     Range(0.01, 1)) = 0.35
+        _SSAOBias       ("SSAO Bias",       Range(0, 0.1)) = 0.02
+        _SSAOContrast   ("SSAO Contrast",   Range(0, 2)) = 1.2
+        _SSAOBlurSize   ("SSAO Blur Size",  Range(0, 4)) = 2
+
+        _UseMotionBlur  ("Motion Blur",     Float) = 0
+        _MotionBlurSamples ("Motion Blur Samples", Range(2, 16)) = 6
+        _MotionBlurSeparation ("Motion Blur Separation", Range(0, 2)) = 1
+
+        _UseOutline     ("Outline",         Float) = 0
+        _OutlineDepthThreshold ("Outline Depth Threshold", Range(0.01, 2)) = 0.6
+        _OutlineNormalThreshold ("Outline Normal Threshold", Range(0, 1)) = 0.8
+        _OutlineColor   ("Outline Color",   Color) = (0.42, 0.36, 0.28, 1)
+
+        _UseDOF         ("Depth Of Field",  Float) = 0
+        _DOFFocusDistance ("DOF Focus Distance", Float) = 8
+        _DOFRange       ("DOF Range",       Float) = 5
+        _DOFBlurSize    ("DOF Blur Size",   Range(0, 16)) = 4
+
+        _UseSSR         ("Screen Space Reflection", Float) = 0
+        _SSRIntensity   ("SSR Intensity",   Range(0, 2)) = 0.35
+        _SSRMaxDistance ("SSR Max Distance", Float) = 6
+        _SSRThickness   ("SSR Thickness",   Range(0.01, 2)) = 0.5
+        _SSRResolution  ("SSR Resolution",  Range(0.05, 1)) = 0.3
+        _SSRSteps       ("SSR Binary Steps", Range(1, 10)) = 5
+
         _UseGamma       ("Gamma",           Float) = 0
         _Gamma          ("Gamma Value",     Range(0.2, 4)) = 1.0
         _UseLUT         ("Lookup Table",    Float) = 1
@@ -374,6 +402,390 @@ Shader "Hidden/3DGameShaders/PostProcessing"
                 float randomIntensity = frac(
                     10000.0 * sin((fragCoord.x + fragCoord.y * _Time.y) * 0.0174532925));
                 return half4(color + _FilmGrainAmount * randomIntensity, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Outline"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Outline
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+            float _UseOutline;
+            float _OutlineDepthThreshold;
+            float _OutlineNormalThreshold;
+            half4 _OutlineColor;
+
+            half4 Outline(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+                half3 color = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+                if (_UseOutline <= 0.5)
+                {
+                    return half4(color, 1.0);
+                }
+
+                float2 texel = 1.0 / _ScreenParams.xy;
+                float depthC = LinearEyeDepth(SampleSceneDepth(uv), _ZBufferParams);
+                float3 normalC = SampleSceneNormals(uv);
+                float maxDepthDiff = 0.0;
+                float minNormalDot = 1.0;
+
+                for (int i = -1; i <= 1; ++i)
+                {
+                    for (int j = -1; j <= 1; ++j)
+                    {
+                        if (i == 0 && j == 0)
+                        {
+                            continue;
+                        }
+                        float2 offsetUV = uv + float2(i, j) * texel;
+                        float depthN = LinearEyeDepth(SampleSceneDepth(offsetUV), _ZBufferParams);
+                        maxDepthDiff = max(maxDepthDiff, abs(depthC - depthN));
+                        float3 normalN = SampleSceneNormals(offsetUV);
+                        minNormalDot = min(minNormalDot, dot(normalC, normalN));
+                    }
+                }
+
+                float depthEdge = smoothstep(_OutlineDepthThreshold, _OutlineDepthThreshold * 1.5, maxDepthDiff);
+                float normalEdge = 1.0 - smoothstep(_OutlineNormalThreshold, 1.0, minNormalDot);
+                float edge = saturate(max(depthEdge, normalEdge));
+                half3 outlineColor = color * _OutlineColor.rgb;
+                return half4(lerp(color, outlineColor, edge), 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SSAO"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment SSAO
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+            float _UseSSAO;
+            float _SSAORadius;
+            float _SSAOBias;
+            float _SSAOIntensity;
+            float _SSAOContrast;
+
+            half4 SSAO(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+
+                if (_UseSSAO <= 0.5)
+                {
+                    return half4(1.0, 1.0, 1.0, 1.0);
+                }
+
+                float rawDepth = SampleSceneDepth(uv);
+                float3 positionWS = ComputeWorldSpacePosition(uv * 2.0 - 1.0, rawDepth, UNITY_MATRIX_I_VP);
+                float3 normalWS = normalize(SampleSceneNormals(uv));
+
+                // Tiled pseudo-random rotation (4x4 tiles, like a small noise texture).
+                float2 noiseUV = floor(uv * _ScreenParams.xy / 4.0);
+                float angle = frac(sin(dot(noiseUV, float2(12.9898, 78.233))) * 43758.5453) * 6.28318530718;
+                float3 random = float3(cos(angle), sin(angle), 0.0);
+
+                float3 tangent = normalize(random - normalWS * dot(random, normalWS));
+                float3 bitangent = cross(normalWS, tangent);
+
+                static const float3 kernel[8] =
+                {
+                    float3(0.35, 0.20, 0.91),
+                    float3(-0.30, 0.35, 0.89),
+                    float3(0.25, -0.40, 0.88),
+                    float3(-0.40, -0.25, 0.88),
+                    float3(0.80, 0.05, 0.60),
+                    float3(-0.05, 0.80, 0.60),
+                    float3(0.70, -0.60, 0.39),
+                    float3(-0.70, -0.55, 0.45)
+                };
+
+                float occlusion = 0.0;
+                for (int i = 0; i < 8; ++i)
+                {
+                    float3 dir = normalize(kernel[i]);
+                    float3 samplePos = positionWS
+                        + (tangent * dir.x + bitangent * dir.y + normalWS * dir.z) * _SSAORadius;
+
+                    float4 clip = TransformWorldToHClip(float4(samplePos, 1.0));
+                    float2 sampleUV = clip.xy / clip.w * 0.5 + 0.5;
+                    if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0)
+                    {
+                        continue;
+                    }
+
+                    float occDepth = SampleSceneDepth(sampleUV);
+                    float3 occWS = ComputeWorldSpacePosition(sampleUV * 2.0 - 1.0, occDepth, UNITY_MATRIX_I_VP);
+
+                    float sampleViewZ = -TransformWorldToView(samplePos).z;
+                    float occViewZ = -TransformWorldToView(occWS).z;
+
+                    float occluded = (occViewZ < sampleViewZ - _SSAOBias) ? 1.0 : 0.0;
+                    float rangeCheck = smoothstep(
+                        0.0, 1.0,
+                        _SSAORadius / max(abs(sampleViewZ - occViewZ), 0.0001));
+                    occlusion += occluded * rangeCheck;
+                }
+
+                occlusion /= 8.0;
+                occlusion = 1.0 - occlusion;
+                occlusion = pow(max(occlusion, 0.0), _SSAOIntensity);
+                occlusion = _SSAOContrast * (occlusion - 0.5) + 0.5;
+                occlusion = saturate(occlusion);
+                return half4(occlusion, occlusion, occlusion, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SSAOApply"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment SSAOApply
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+
+            TEXTURE2D_X(_SSAOTexture);
+
+            half4 SSAOApply(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                half3 color = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, input.texcoord).rgb;
+                half ao = SAMPLE_TEXTURE2D_X(_SSAOTexture, sampler_LinearClamp, input.texcoord).r;
+                return half4(color * ao, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "MotionBlur"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment MotionBlur
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+
+            TEXTURE2D_X(_MotionVectorTexture);
+            float _UseMotionBlur;
+            float _MotionBlurSamples;
+            float _MotionBlurSeparation;
+
+            half4 MotionBlur(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+                half3 color = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+                if (_UseMotionBlur <= 0.5)
+                {
+                    return half4(color, 1.0);
+                }
+
+                // Motion vectors are stored as an NDC-space delta; convert to UV space.
+                float2 direction = SAMPLE_TEXTURE2D_X(_MotionVectorTexture, sampler_PointClamp, uv).rg * 0.5;
+                if (length(direction) <= 0.0001)
+                {
+                    return half4(color, 1.0);
+                }
+
+                int samples = int(max(_MotionBlurSamples, 1.0));
+                direction *= _MotionBlurSeparation;
+                float2 forward = uv;
+                float2 backward = uv;
+                half3 acc = color;
+                float count = 1.0;
+                for (int i = 0; i < samples; ++i)
+                {
+                    forward += direction;
+                    backward -= direction;
+                    acc += SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, forward).rgb;
+                    acc += SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, backward).rgb;
+                    count += 2.0;
+                }
+                return half4(acc / count, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DOFMix"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment DOFMix
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+
+            TEXTURE2D_X(_DOFBlurTexture);
+            float _UseDOF;
+            float _DOFFocusDistance;
+            float _DOFRange;
+
+            half4 DOFMix(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+                half3 sharp = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+                if (_UseDOF <= 0.5)
+                {
+                    return half4(sharp, 1.0);
+                }
+
+                half3 blur = SAMPLE_TEXTURE2D_X(_DOFBlurTexture, sampler_LinearClamp, uv).rgb;
+                float depth = LinearEyeDepth(SampleSceneDepth(uv), _ZBufferParams);
+                float range = max(_DOFRange, 0.01);
+                float amount = smoothstep(range * 0.5, range, abs(depth - _DOFFocusDistance));
+                return half4(lerp(sharp, blur, saturate(amount)), 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ScreenSpaceReflection"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment ScreenSpaceReflection
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+            float _UseSSR;
+            float _SSRIntensity;
+            float _SSRMaxDistance;
+            float _SSRThickness;
+            float _SSRResolution;
+            float _SSRSteps;
+
+            float2 ProjectToUv(float4 clip)
+            {
+                float2 ndc = clip.xy / clip.w;
+                float2 uvYUp = ndc * 0.5 + 0.5;
+                return float2(uvYUp.x, 1.0 - uvYUp.y);
+            }
+
+            half4 ScreenSpaceReflection(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+                half3 color = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+                if (_UseSSR <= 0.5)
+                {
+                    return half4(color, 1.0);
+                }
+
+                float rawDepth = SampleSceneDepth(uv);
+                float2 ndcUV = float2(uv.x, 1.0 - uv.y);
+                float3 positionWS = ComputeWorldSpacePosition(ndcUV, rawDepth, UNITY_MATRIX_I_VP);
+                float3 normalWS = normalize(SampleSceneNormals(uv));
+                float3 viewPos = TransformWorldToView(positionWS);
+                float3 viewNormal = TransformWorldToViewDir(normalWS);
+                float3 unitViewDir = normalize(-viewPos);
+                float3 pivot = normalize(reflect(unitViewDir, viewNormal));
+
+                float maxDistance = max(_SSRMaxDistance, 0.01);
+                float startEye = -viewPos.z;
+                float3 endViewPos = viewPos + pivot * maxDistance;
+                float endEye = -endViewPos.z;
+
+                float2 startPixel = ProjectToUv(mul(UNITY_MATRIX_P, float4(viewPos, 1.0))) * _ScreenParams.xy;
+                float2 endPixel = ProjectToUv(mul(UNITY_MATRIX_P, float4(endViewPos, 1.0))) * _ScreenParams.xy;
+
+                float2 deltaPixel = endPixel - startPixel;
+                float useX = abs(deltaPixel.x) >= abs(deltaPixel.y) ? 1.0 : 0.0;
+                float delta = lerp(abs(deltaPixel.y), abs(deltaPixel.x), useX) * clamp(_SSRResolution, 0.01, 1.0);
+                float2 increment = deltaPixel / max(delta, 0.001);
+                float2 fragPixel = startPixel;
+                float search0 = 0.0;
+                float search1 = 0.0;
+                int hit0 = 0;
+                int hit1 = 0;
+                float thickness = max(_SSRThickness, 0.01);
+                float depthDiff = thickness;
+
+                for (int i = 0; i < int(delta); ++i)
+                {
+                    fragPixel += increment;
+                    float2 sampleUV = fragPixel / _ScreenParams.xy;
+                    if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0)
+                    {
+                        continue;
+                    }
+                    search1 = useX * ((fragPixel.x - startPixel.x) / deltaPixel.x)
+                        + (1.0 - useX) * ((fragPixel.y - startPixel.y) / deltaPixel.y);
+                    search1 = clamp(search1, 0.0, 1.0);
+                    float sceneEye = LinearEyeDepth(SampleSceneDepth(sampleUV), _ZBufferParams);
+                    float rayEye = lerp(startEye, endEye, search1);
+                    depthDiff = rayEye - sceneEye;
+                    if (depthDiff > 0.0 && depthDiff < thickness)
+                    {
+                        hit0 = 1;
+                        break;
+                    }
+                    search0 = search1;
+                }
+
+                search1 = search0 + (search1 - search0) * 0.5;
+                int steps = int(max(_SSRSteps, 1.0)) * hit0;
+                for (int i = 0; i < steps; ++i)
+                {
+                    float2 sampleUV = lerp(startPixel, endPixel, search1) / _ScreenParams.xy;
+                    float sceneEye = LinearEyeDepth(SampleSceneDepth(sampleUV), _ZBufferParams);
+                    float rayEye = lerp(startEye, endEye, search1);
+                    depthDiff = rayEye - sceneEye;
+                    if (depthDiff > 0.0 && depthDiff < thickness)
+                    {
+                        hit1 = 1;
+                        search1 = search0 + (search1 - search0) * 0.5;
+                    }
+                    else
+                    {
+                        float temp = search1;
+                        search1 += (search1 - search0) * 0.5;
+                        search0 = temp;
+                    }
+                }
+
+                float2 hitUV = lerp(startPixel, endPixel, search1) / _ScreenParams.xy;
+                float3 hitViewPos = lerp(viewPos, endViewPos, search1);
+                float visibility = hit1
+                    * (1.0 - max(dot(-unitViewDir, pivot), 0.0))
+                    * (1.0 - clamp(depthDiff / thickness, 0.0, 1.0))
+                    * (1.0 - clamp(length(hitViewPos - viewPos) / maxDistance, 0.0, 1.0));
+                visibility = saturate(visibility);
+                if (visibility <= 0.001
+                    || hitUV.x < 0.0 || hitUV.x > 1.0
+                    || hitUV.y < 0.0 || hitUV.y > 1.0)
+                {
+                    return half4(color, 1.0);
+                }
+
+                half3 reflection = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, hitUV).rgb;
+                half3 result = lerp(color, reflection, visibility * _SSRIntensity);
+                return half4(result, 1.0);
             }
             ENDHLSL
         }

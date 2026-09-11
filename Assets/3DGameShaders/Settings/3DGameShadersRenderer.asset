@@ -85,6 +85,29 @@ MonoBehaviour:
     bloomThreshold: 0.6
     bloomAmount: 0.6
     blurSize: 3
+    ssaoEnabled: 0
+    ssaoIntensity: 1
+    ssaoRadius: 0.35
+    ssaoBias: 0.02
+    ssaoContrast: 1.2
+    ssaoBlurSize: 2
+    motionBlurEnabled: 0
+    motionBlurSamples: 6
+    motionBlurSeparation: 1
+    outlineEnabled: 0
+    outlineDepthThreshold: 0.6
+    outlineNormalThreshold: 0.8
+    outlineColor: {r: 0.42, g: 0.36, b: 0.28, a: 1}
+    dofEnabled: 0
+    dofFocusDistance: 8
+    dofRange: 5
+    dofBlurSize: 4
+    ssrEnabled: 1
+    ssrIntensity: 0.35
+    ssrMaxDistance: 6
+    ssrThickness: 0.5
+    ssrResolution: 0.3
+    ssrSteps: 5
     pixelizeEnabled: 0
     pixelSize: 8
     dilationEnabled: 0

@@ -37,27 +37,50 @@ Material:
     - _BloomThreshold: 0.6
     - _BlurSize: 2
     - _CAAmount: 1
+    - _DOFBlurSize: 4
+    - _DOFFocusDistance: 8
+    - _DOFRange: 5
     - _DilationSeparation: 1
     - _DilationSize: 1
     - _FilmGrainAmount: 0.01
     - _FogFar: 60
     - _FogNear: 20
     - _Gamma: 1
+    - _MotionBlurSamples: 6
+    - _MotionBlurSeparation: 1
+    - _OutlineDepthThreshold: 0.6
+    - _OutlineNormalThreshold: 0.8
     - _PixelSize: 8
     - _PosterizeLevels: 6
+    - _SSAOBias: 0.02
+    - _SSAOBlurSize: 2
+    - _SSAOContrast: 1.2
+    - _SSAOIntensity: 1
+    - _SSAORadius: 0.35
+    - _SSRIntensity: 0.35
+    - _SSRMaxDistance: 6
+    - _SSRResolution: 0.3
+    - _SSRSteps: 5
+    - _SSRThickness: 0.5
     - _SharpenAmount: 0.3
     - _SunPosition: 0.5
     - _UseBloom: 1
     - _UseChromaticAberration: 0
+    - _UseDOF: 0
     - _UseDilation: 0
     - _UseFilmGrain: 0
     - _UseFog: 0
     - _UseGamma: 0
     - _UseLUT: 1
+    - _UseMotionBlur: 0
+    - _UseOutline: 0
     - _UsePixelize: 0
     - _UsePosterize: 0
+    - _UseSSAO: 0
+    - _UseSSR: 0
     - _UseSharpen: 0
     m_Colors:
     - _CAFocusPoint: {r: 0.5, g: 0.5, b: 0, a: 0}
     - _FogColor: {r: 0.78, g: 0.83, b: 0.9, a: 1}
+    - _OutlineColor: {r: 0.41999996, g: 0.35999998, b: 0.27999997, a: 1}
   m_BuildTextureStacks: []

@@ -39,6 +39,7 @@ Material:
     m_Floats:
     - _AmbientStrength: 0.8
     - _CelShading: 0
+    - _Cull: 2
     - _FresnelPower: 2
     - _RimStrength: 1.2
     - _Shininess: 32
