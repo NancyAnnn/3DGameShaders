@@ -102,7 +102,7 @@ MonoBehaviour:
     dofFocusDistance: 8
     dofRange: 5
     dofBlurSize: 4
-    ssrEnabled: 1
+    ssrEnabled: 0
     ssrIntensity: 0.35
     ssrMaxDistance: 6
     ssrThickness: 0.5

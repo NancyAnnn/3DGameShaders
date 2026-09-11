@@ -221,6 +221,14 @@ public static class MillSceneSetup
 
     private static Material LoadOrCreateMillMaterial(Shader baseShader, string baseName)
     {
+        // The river section gets the screen space water material instead of the
+        // lit base shader: refraction, reflection and foam all need the camera
+        // depth and opaque textures, which the base shader knows nothing about.
+        if (baseName == "water")
+        {
+            return WaterSurfaceSetup.LoadOrCreateWaterMaterial();
+        }
+
         string path = RootDir + "/Materials/Mill_" + baseName + ".mat";
         Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (material == null)
