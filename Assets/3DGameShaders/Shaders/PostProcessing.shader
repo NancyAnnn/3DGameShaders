@@ -848,7 +848,12 @@ Shader "Hidden/3DGameShaders/PostProcessing"
 
                 if (_UseLUT > 0.5)
                 {
-                    color = ApplyLUT(color);
+                    // lookup-table.frag converts to sRGB, samples the tables and
+                    // converts back, so the lookup runs on sRGB values rather
+                    // than on the linear buffer.
+                    half3 srgb = pow(max(color, half3(0, 0, 0)), half3(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2));
+                    srgb = ApplyLUT(srgb);
+                    color = pow(max(srgb, half3(0, 0, 0)), half3(2.2, 2.2, 2.2));
                 }
 
                 return half4(color, 1.0);

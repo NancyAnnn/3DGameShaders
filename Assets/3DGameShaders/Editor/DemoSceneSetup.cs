@@ -22,11 +22,11 @@ public static class DemoSceneSetup
     private const string SmokeName = "SmokeParticles";
     private const string ControllerName = "DemoController";
 
-    // Panda3D places the smoke node at (0.47, 4.5, 8.9). In Unity's y-up axes
-    // that is (0.47, 8.9, -4.5) - but the chimney surface at that x/z reaches
-    // y = 9.40, so spawning at 8.9 buries the particles inside the roof and they
-    // rise straight through it. Spawn just above the measured chimney top.
-    private static readonly Vector3 SmokePosition = new Vector3(0.47f, 9.6f, -4.5f);
+    // Panda3D places the smoke node at (0.47, 4.5, 8.9) which in Unity's y-up
+    // axes is (0.47, 8.9, -4.5). The roof surface in that column measures
+    // y = 8.64, so the tutorial's height already sits in the chimney mouth -
+    // that is what makes the plume read as coming out of the chimney.
+    private static readonly Vector3 SmokePosition = new Vector3(0.47f, 8.9f, -4.5f);
 
     [MenuItem("3DGameShaders/Setup Demo Extras (Audio, Particles, Controls)")]
     public static void SetupExtras()
@@ -43,6 +43,8 @@ public static class DemoSceneSetup
 
     private static void SetupExtrasInternal(bool applyParticleDefaults)
     {
+        FixLookupTableImports();
+
         int sounds = SetupAudio();
         bool smoke = SetupSmoke(applyParticleDefaults);
         bool vane = SetupWeatherVane();
@@ -156,8 +158,8 @@ public static class DemoSceneSetup
         main.loop = true;
         main.prewarm = true;
         main.startLifetime = new ParticleSystem.MinMaxCurve(3f, 6f);
-        main.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.5f, 1.4f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(1.1f, 1.8f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.4f, 1.2f);
         main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
         main.gravityModifier = -0.02f;             // buoyancy, so it keeps rising
         main.simulationSpace = ParticleSystemSimulationSpace.World;
@@ -168,8 +170,10 @@ public static class DemoSceneSetup
 
         ParticleSystem.ShapeModule shape = particles.shape;
         shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle = 12f;
-        shape.radius = 0.15f;
+        // A tight column so the smoke leaves the chimney as a plume rather than
+        // a wide puff that immediately spreads into the roof.
+        shape.angle = 6f;
+        shape.radius = 0.08f;
 
         // Without this the smoke only hovers at the chimney mouth: the original
         // pushes the particles with an offset force, so add a steady updraft plus
@@ -177,7 +181,10 @@ public static class DemoSceneSetup
         ParticleSystem.VelocityOverLifetimeModule velocity = particles.velocityOverLifetime;
         velocity.enabled = true;
         velocity.space = ParticleSystemSimulationSpace.World;
-        velocity.x = new ParticleSystem.MinMaxCurve(0.25f);
+        // Straight up at the chimney mouth, leaning over further up. The roof
+        // ridge beside the chimney reaches y = 10, so drifting early would push
+        // the plume through it.
+        velocity.x = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0f, 1f, 0.45f));
         velocity.y = new ParticleSystem.MinMaxCurve(0.8f);
         velocity.z = new ParticleSystem.MinMaxCurve(0f);
 
@@ -218,18 +225,42 @@ public static class DemoSceneSetup
         Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
         if (material == null)
         {
-            // Sprites/Default is an unlit, alpha blended shader that works under
-            // URP and takes particle vertex colours, which is what the original's
-            // sprite particle renderer does.
-            Shader shader = Shader.Find("Sprites/Default");
-            material = new Material(shader);
+            material = new Material(Shader.Find("3DGameShaders/Smoke"));
             AssetDatabase.CreateAsset(material, path);
+        }
+
+        Shader smokeShader = Shader.Find("3DGameShaders/Smoke");
+        if (smokeShader != null)
+        {
+            material.shader = smokeShader;
         }
 
         material.SetTexture("_MainTex", smokeTexture);
         material.SetColor("_Color", Color.white);
         EditorUtility.SetDirty(material);
         return material;
+    }
+
+    // The tutorial samples the lookup tables raw and wraps its own sRGB
+    // round-trip around the lookup. Unity must therefore hand the shader the
+    // stored texel values instead of decoding them first.
+    private static void FixLookupTableImports()
+    {
+        SetTextureLinear("lookup-table-0.png");
+        SetTextureLinear("lookup-table-1.png");
+    }
+
+    private static void SetTextureLinear(string fileName)
+    {
+        string path = TexturesDir + "/" + fileName;
+        TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
+        if (importer == null || !importer.sRGBTexture)
+        {
+            return;
+        }
+
+        importer.sRGBTexture = false;
+        importer.SaveAndReimport();
     }
 
     // ---------------------------------------------------------------

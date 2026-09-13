@@ -353,8 +353,11 @@ public sealed class DemoEffectsController : MonoBehaviour
         PostProcessingFeature.Settings settings = CurrentSettings();
         if (settings != null)
         {
-            // The lookup table blends between its two tables with this value.
-            settings.sunPosition = Mathf.Repeat(m_SunAngle / 360f, 1f);
+            // lookup-table.frag blends its two tables with
+            // 0.5 * (sin(sunPosition) + 1), so this is a sine of the sun angle,
+            // not a linear ramp. At the tutorial's starting 260 degrees that is
+            // about 0.008 - almost entirely the first table.
+            settings.sunPosition = 0.5f * (Mathf.Sin(m_SunAngle * Mathf.Deg2Rad) + 1f);
         }
     }
 

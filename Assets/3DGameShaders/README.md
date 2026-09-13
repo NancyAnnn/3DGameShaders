@@ -29,7 +29,8 @@ Phase 5（演示交互层）：
 - DemoEffectsController：原教程的全套按键开关 + 屏幕控件面板 + 状态文字
 - BaseLit 增加法线贴图 / 菲涅尔 / Rim / Phong-Blinn 运行时开关
 - Kuwahara 水彩滤镜（Painterly）后处理 pass
-- 定位音效（水车、水面）与烟囱烟雾粒子、太阳动画（含日夜换色与夜间窗灯）
+- 定位音效（水车、水面）与烟囱烟雾粒子（软粒子，见 Smoke.shader）、
+  太阳动画（含日夜换色与夜间窗灯）
 - 水车与风向标自转（原教程对应烘焙动画 `wheel` 与 `weather-vane-shake`）
 
 ## 如何开关效果
@@ -129,10 +130,15 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
   想让它斜着飘得更远就加大 x
 - `Emission -> Rate over Time` 控制浓度
 
-生成点高度是 `SmokeParticles` 对象的 Y 坐标，默认 **9.6**。
-烟囱顶实测在 y = 9.40（教程的 8.9 其实埋在屋顶里，粒子会从屋顶内部穿出来），
-所以生成点抬高到屋顶之上。想改就拖动这个对象的 Y，或者直接改
-`DemoSceneSetup.SmokePosition`。重新执行 `Setup Demo Extras` 会更新位置但保留你调的粒子参数。
+生成点高度是 `SmokeParticles` 对象的 Y 坐标，默认 **8.9**，就是教程里的高度：
+实测该处的屋顶表面在 y = 8.64，所以 8.9 正好落在烟囱口内侧，粒子先被屋顶遮住、
+升起后才露出来，看起来才是"从烟囱里冒出来"。
+
+粒子用的是 `Shaders/Smoke.shader`（软粒子）：按场景深度把贴着屋顶的粒子淡出，
+所以烟柱经过屋顶时不会割出一条硬边。`_SoftFade` 控制淡出的距离。
+
+想改位置就拖动这个对象的 Y，或者改 `DemoSceneSetup.SmokePosition`。
+重新执行 `Setup Demo Extras` 会更新位置但保留你调的粒子参数。
 
 手工调过之后不要点 `Reset Smoke Particles`，那个菜单项会把这些值重置回默认。
 
@@ -147,6 +153,17 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 - 水面着色器的四个调试视图（泡沫量 / 水深系数 / 反射权重 / 水体厚度），
   只统计水面像素，给出均值与最大值——用来判断某个效果到底算出来没有
 - 当前水面材质与后处理的全部开关和关键参数
+
+### 查找表与整体色调
+
+教程的 `lookup-table.frag` 做两件容易被忽略的事，现在都已对齐：
+
+1. 混合两套查找表用的是 `0.5 * (sin(太阳角度) + 1)`，不是线性比例。
+   教程初始 `sunlightP = 260°` → 因子约 **0.008**，也就是几乎全用第一张表。
+   `DemoEffectsController` 现在按这个公式写入 `sunPosition`。
+2. 查表前后各有一次 sRGB 往返（`pow(color, 1/2.2)` → 查表 → `pow(结果, 2.2)`），
+   因为教程是在 sRGB 空间查表的。`PostProcessing.shader` 的 Final pass 已照做，
+   同时 `lookup-table-0/1.png` 改为线性导入，避免 Unity 再替我们解码一次。
 
 这张报告是纯文本，调参或改代码之后重跑一次就能看出前后差异。
 

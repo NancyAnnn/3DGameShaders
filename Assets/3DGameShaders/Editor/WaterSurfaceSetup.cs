@@ -172,10 +172,10 @@ public static class WaterSurfaceSetup
         material.SetColor("_FoamColor", new Color(0.8f, 0.85f, 0.92f, 1f));
         // The bank crosses the water plane, so a wider band than the tutorial's
         // 1.5 lets the shoreline foam actually reach the screen.
-        material.SetFloat("_FoamDepth", 2.5f);
+        material.SetFloat("_FoamDepth", 3.5f);
         material.SetFloat("_FoamIntensity", 1f);
-        material.SetFloat("_FoamThreshold", 0.35f);
-        material.SetFloat("_FoamSoftness", 0.2f);
+        material.SetFloat("_FoamThreshold", 0.22f);
+        material.SetFloat("_FoamSoftness", 0.3f);
         material.SetFloat("_FoamFalloff", 1.2f);
         material.SetFloat("_DebugView", 0f);
         material.SetFloat("_SpecularIntensity", 1f);

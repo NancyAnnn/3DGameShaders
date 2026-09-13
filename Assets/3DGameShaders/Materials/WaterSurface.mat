@@ -51,11 +51,11 @@ Material:
     - _EnvironmentStrength: 0.6
     - _FallbackStrength: 0.6
     - _FlowSpeed: 1
-    - _FoamDepth: 2.5
+    - _FoamDepth: 3.5
     - _FoamFalloff: 1.2
     - _FoamIntensity: 1
-    - _FoamSoftness: 0.2
-    - _FoamThreshold: 0.35
+    - _FoamSoftness: 0.3
+    - _FoamThreshold: 0.22
     - _FoamTiling: 1
     - _NormalStrength: 1
     - _NormalTiling: 1
