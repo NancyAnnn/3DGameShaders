@@ -27,8 +27,20 @@ public static class DemoSceneSetup
     [MenuItem("3DGameShaders/Setup Demo Extras (Audio, Particles, Controls)")]
     public static void SetupExtras()
     {
+        SetupExtrasInternal(false);
+    }
+
+    // Re-applies the particle settings over an existing system.
+    [MenuItem("3DGameShaders/Reset Smoke Particles")]
+    public static void ResetSmokeParticles()
+    {
+        SetupExtrasInternal(true);
+    }
+
+    private static void SetupExtrasInternal(bool applyParticleDefaults)
+    {
         int sounds = SetupAudio();
-        bool smoke = SetupSmoke();
+        bool smoke = SetupSmoke(applyParticleDefaults);
         bool controller = SetupController();
 
         Scene scene = SceneManager.GetActiveScene();
@@ -103,7 +115,7 @@ public static class DemoSceneSetup
     // Smoke: setUpParticles in main.cxx - 75 particle pool, ~3 second life,
     // rising slowly, fading from white to dark blue.
     // ---------------------------------------------------------------
-    private static bool SetupSmoke()
+    private static bool SetupSmoke(bool applyDefaults)
     {
         Texture2D smokeTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(TexturesDir + "/smoke.png");
         if (smokeTexture == null)
@@ -125,6 +137,11 @@ public static class DemoSceneSetup
         {
             particles = go.AddComponent<ParticleSystem>();
         }
+        else if (!applyDefaults)
+        {
+            // Keep whatever was tuned in the inspector.
+            return true;
+        }
 
         // Adding the component runs the default Play; stop it so the settings
         // below are what actually gets emitted.
@@ -133,11 +150,11 @@ public static class DemoSceneSetup
         ParticleSystem.MainModule main = particles.main;
         main.loop = true;
         main.prewarm = true;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(2f, 4f);
-        main.startSpeed = new ParticleSystem.MinMaxCurve(0.25f, 0.5f);
-        main.startSize = new ParticleSystem.MinMaxCurve(0.4f, 1.1f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(3f, 6f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.5f, 1.4f);
         main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-        main.gravityModifier = -0.015f;            // smoke rises
+        main.gravityModifier = -0.02f;             // buoyancy, so it keeps rising
         main.simulationSpace = ParticleSystemSimulationSpace.World;
         main.maxParticles = 75;                    // tutorial pool size
 
@@ -146,12 +163,22 @@ public static class DemoSceneSetup
 
         ParticleSystem.ShapeModule shape = particles.shape;
         shape.shapeType = ParticleSystemShapeType.Cone;
-        shape.angle = 10f;
-        shape.radius = 0.12f;
+        shape.angle = 12f;
+        shape.radius = 0.15f;
+
+        // Without this the smoke only hovers at the chimney mouth: the original
+        // pushes the particles with an offset force, so add a steady updraft plus
+        // a sideways wind so the plume drifts away.
+        ParticleSystem.VelocityOverLifetimeModule velocity = particles.velocityOverLifetime;
+        velocity.enabled = true;
+        velocity.space = ParticleSystemSimulationSpace.World;
+        velocity.x = new ParticleSystem.MinMaxCurve(0.25f);
+        velocity.y = new ParticleSystem.MinMaxCurve(0.8f);
+        velocity.z = new ParticleSystem.MinMaxCurve(0f);
 
         ParticleSystem.SizeOverLifetimeModule size = particles.sizeOverLifetime;
         size.enabled = true;
-        size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.15f, 1f, 1f));
+        size.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.2f, 1f, 1f));
 
         // Colour ramp from the tutorial: white smoke settling into dark blue,
         // fading out at the end.

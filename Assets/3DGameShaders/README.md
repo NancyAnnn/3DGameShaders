@@ -104,7 +104,43 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 
 可调参数在 `Materials/WaterSurface.mat`：`_WaterDepth`/`_TintStrength`/`_TintColor`
 控制水色，`_FoamDepth`/`_FoamIntensity` 控制泡沫范围，`_RefractionStrength` 是折射偏移像素数，
-`_SSR*` 控制反射射程与步进，`_FlowSpeed` 是流动速度。
+`_SSR*` 控制反射射程与步进。
+
+`_FlowSpeed` 是流动速度，默认 **1.0**：教程的 `normal.frag` 用
+`flow * osg_FrameTime` 平移 UV，`flowMapsEnabled` 只是 0/1 开关而不是倍率，
+所以 1.0 才是教程的速率（up-flow.png 携带 (0, 0.25)，即每秒四分之一 UV）。
+觉得太快就往下调，0.05 会慢二十倍。
+
+> 注意：`Setup Screen Space Water` 现在只在材质**新建时**写入默认值，
+> 手工调过的参数不会被覆盖。要回到基准值用
+> `3DGameShaders -> Reset Water Material To Defaults`。
+
+## 调参与验证
+
+### 烟雾粒子
+
+参数在场景里 `SmokeParticles` 对象的 **ParticleSystem** 组件上，常用几个：
+
+- `Main -> Start Speed` 决定飘出烟囱的初速度（默认 1.2–2.2）
+- `Main -> Gravity Modifier` 是负值（浮力），越大上升越持续
+- `Main -> Start Lifetime` 决定飘多远才消失
+- `Velocity over Lifetime` 里的 `x/y` 是持续的风与上升气流，默认 y=0.8、x=0.25，
+  想让它斜着飘得更远就加大 x
+- `Emission -> Rate over Time` 控制浓度
+
+手工调过之后不要点 `Reset Smoke Particles`，那个菜单项会把这些值重置回默认。
+
+### 渲染探针
+
+`3DGameShaders -> Render Probe (writes report)`：Play 模式下执行，它会把相机渲染两张图
+（一张正常、一张隐藏水面网格），比较两者的差异，然后把统计结果写到
+`Assets/3DGameShaders/render-probe-report.txt`。报告里包括：
+
+- 水面占画面的比例、水面平均色与"移除水面后同样像素"的平均色（也就是河床）
+- 两者比值、平均差值（0 = 水面不可见，3 = 完全覆盖河床）、比河床亮的泡沫像素占比
+- 当前水面材质与后处理的全部开关和关键参数
+
+这张报告是纯文本，调参或改代码之后重跑一次就能看出前后差异。
 
 ## 使用步骤
 
@@ -145,7 +181,12 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 另外这些没有移植：
 
 - Deferred GBuffer 路径（架构差异，见水面一节）
-- 太阳落山时开合的百叶窗动画（需要额外的骨骼/动画数据）
+- 百叶窗开合动画：原教程靠模型里烘焙好的 `open-shutters` / `close-shutters`
+  两段动画驱动具名节点；我们手上的 `shutters.obj` 是静态网格，而且内部是
+  **230 个互不相连的小板条孤岛**（每个 7–11 个顶点），没有"左扇/右扇"这种可绕铰链旋转的节点。
+  想做得在 Blender 里把门与左右百叶拆成独立对象再导出，然后才能接上开合逻辑。
+  作为替代，`DemoEffectsController` 已经实现了 `animateLights` 的实质内容：
+  太阳随角度转红并熄灭、窗灯在夜间亮起（`pow(night, 0.4)`）。
 - 原教程水面在雾里的特殊烟雾遮罩处理
 
 注意：贴图仅用于本地学习（原仓库仅 .cxx/.vert/.frag 开放 BSD 许可）。

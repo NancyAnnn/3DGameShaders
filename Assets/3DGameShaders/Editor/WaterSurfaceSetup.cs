@@ -102,7 +102,24 @@ public static class WaterSurfaceSetup
         Debug.Log("3DGameShaders: batch water setup finished.");
     }
 
-    public static Material LoadOrCreateWaterMaterial(string materialName = WaterMaterialName)
+    // applyDefaults is only true when the material is created, or when the user
+    // asks for it through "Reset Water Material To Defaults". That way tuning the
+    // material by hand is not wiped out every time the scene is set up.
+    [MenuItem("3DGameShaders/Reset Water Material To Defaults")]
+    public static void ResetWaterMaterialToDefaults()
+    {
+        Material material = LoadOrCreateWaterMaterial(WaterMaterialName, applyDefaults: true);
+        if (material == null)
+        {
+            return;
+        }
+
+        Debug.Log("3DGameShaders: " + WaterMaterialName + ".mat reset to the tutorial defaults "
+            + "(flow speed 1.0, foam depth 1.5, refraction 24 px, SSR on).");
+    }
+
+    public static Material LoadOrCreateWaterMaterial(
+        string materialName = WaterMaterialName, bool applyDefaults = false)
     {
         Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(WaterShaderPath);
         if (shader == null)
@@ -112,10 +129,12 @@ public static class WaterSurfaceSetup
 
         string path = MaterialsDir + "/" + materialName + ".mat";
         Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+        bool created = false;
         if (material == null)
         {
             material = new Material(shader);
             AssetDatabase.CreateAsset(material, path);
+            created = true;
         }
 
         material.shader = shader;
@@ -125,10 +144,16 @@ public static class WaterSurfaceSetup
         material.SetTexture("_FoamPattern", LoadTexture("foam-pattern.png"));
         material.SetTexture("_SpecularMap", LoadTexture("water-specular.png"));
 
-        // Reset the tuning to the tutorial's constants so re-running this always
-        // lands on a known starting point. The river bed is ~3 units under the
-        // surface, so _FoamDepth stays small: foam belongs on the water line of
-        // the wheel and the dock, not over the whole river.
+        if (!created && !applyDefaults)
+        {
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        // The tutorial's constants. The river bed is ~3 units under the surface,
+        // so _FoamDepth stays small: foam belongs on the water line of the wheel
+        // and the dock, not over the whole river.
+        material.SetFloat("_FlowSpeed", 1f);
         material.SetColor("_TintColor", new Color(0.392f, 0.537f, 0.561f, 1f));
         material.SetFloat("_TintStrength", 0.15f);
         material.SetFloat("_WaterDepth", 2f);

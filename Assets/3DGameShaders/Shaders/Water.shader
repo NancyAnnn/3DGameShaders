@@ -31,7 +31,10 @@ Shader "3DGameShaders/WaterSurface"
         [Header(Flow Mapped Normal)]
         _NormalMap          ("Normal Map", 2D) = "bump" {}
         _FlowMap            ("Flow Map", 2D) = "gray" {}
-        _FlowSpeed          ("Flow Speed", Float) = 0.05
+        // normal.frag scrolls by "flow * frameTime" with no speed multiplier, so
+        // 1.0 here is the tutorial's rate: the flow map's own vector per second.
+        // up-flow.png carries (0, 0.25), i.e. a quarter UV per second.
+        _FlowSpeed          ("Flow Speed", Float) = 1
         _NormalTiling       ("Normal Tiling", Float) = 1
         _NormalStrength     ("Normal Strength", Range(0, 2)) = 1
 

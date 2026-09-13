@@ -33,7 +33,13 @@ public sealed class DemoEffectsController : MonoBehaviour
     private const float StatusHoldSeconds = 2.5f;
 
     private readonly List<Material> m_BaseLitMaterials = new List<Material>();
+    private readonly List<Material> m_WindowLamps = new List<Material>();
+    private readonly List<Color> m_WindowLampColors = new List<Color>();
     private Material m_WaterMaterial;
+
+    // Day and dusk colours from the tutorial's animateLights.
+    private static readonly Color SunDayColor = new Color(0.765f, 0.573f, 0.400f);
+    private static readonly Color SunDuskColor = new Color(0.612f, 0.365f, 0.306f);
 
     private float m_StatusUntil;
     private string m_Status = "Ready";
@@ -118,6 +124,13 @@ public sealed class DemoEffectsController : MonoBehaviour
             else if (shared.shader != null && shared.shader.name == "3DGameShaders/WaterSurface")
             {
                 m_WaterMaterial = renderer.material;
+            }
+
+            if (renderer.gameObject.name == "LampWarm" || renderer.gameObject.name == "LampCool")
+            {
+                Material lamp = renderer.material;
+                m_WindowLamps.Add(lamp);
+                m_WindowLampColors.Add(lamp.GetColor("_EmissionColor"));
             }
         }
     }
@@ -309,12 +322,32 @@ public sealed class DemoEffectsController : MonoBehaviour
     {
         m_SunAngle = degrees;
 
+        // +1 at noon, -1 at midnight.
+        float elevation = Mathf.Sin(m_SunAngle * Mathf.Deg2Rad);
+        float day = Mathf.Clamp01(elevation);
+        float night = Mathf.Clamp01(-elevation);
+
         if (sunLight != null)
         {
             sunLight.transform.rotation = Quaternion.Euler(m_SunAngle, -30f, 0f);
-            // Below the horizon fades the light out, like the tutorial's night.
-            float elevation = Mathf.Sin(m_SunAngle * Mathf.Deg2Rad);
-            sunLight.intensity = Mathf.Clamp01(elevation) * 1.2f;
+            // The light reddens as it approaches the horizon and fades out below
+            // it, the same way animateLights blends its two sunlight colours.
+            float horizon = 1f - Mathf.Clamp01(Mathf.Abs(elevation));
+            sunLight.color = Color.Lerp(SunDayColor, SunDuskColor, horizon * 0.85f);
+            sunLight.intensity = day * 1.2f;
+        }
+
+        // Window lights come up at night (pow(night, 0.4) in the tutorial).
+        float windowAmount = Mathf.Pow(night, 0.4f);
+        for (int i = 0; i < m_WindowLamps.Count; i++)
+        {
+            Material lamp = m_WindowLamps[i];
+            if (lamp == null)
+            {
+                continue;
+            }
+            Color baseColor = m_WindowLampColors[i];
+            lamp.SetColor("_EmissionColor", baseColor * windowAmount);
         }
 
         PostProcessingFeature.Settings settings = CurrentSettings();
