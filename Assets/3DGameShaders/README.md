@@ -25,6 +25,12 @@ Phase 3（中级后处理）：
 Phase 4（屏幕空间水面）：
 - Water.shader：菲涅尔高光、折射偏移、深度泡沫、流动法线、水面专用 SSR
 
+Phase 5（演示交互层）：
+- DemoEffectsController：原教程的全套按键开关 + 屏幕控件面板 + 状态文字
+- BaseLit 增加法线贴图 / 菲涅尔 / Rim / Phong-Blinn 运行时开关
+- Kuwahara 水彩滤镜（Painterly）后处理 pass
+- 定位音效（水车、水面）与烟囱烟雾粒子、太阳动画
+
 ## 如何开关效果
 
 Project 窗口选中 Assets/3DGameShaders/Settings/3DGameShadersRenderer.asset，
@@ -37,27 +43,38 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 （Queue=Transparent、ZWrite Off，深度缓冲里始终保留水下的河床）。
 它按原教程 base-combine.frag 的顺序合成：
 
-1. 折射：背景色按水面法线偏移采样 `_CameraOpaqueTexture`，再按水深混向"深水色"
-   （水深 = 场景深度 − 水面深度，`_WaterDepth` 默认 2.0，与教程 depthMax 一致）
+1. 折射：背景色按水面法线偏移采样 `_CameraOpaqueTexture`，再按水深混向"深水色"。
+   水深 = 场景深度 − 水面深度，吸收用指数形式 `1 - exp(-水深/_WaterDepth)`，
+   再乘 `_WaterBodyStrength`。**不能用 `saturate(水深/_WaterDepth)`**：这条河到处都有
+   3 个单位深，比值会直接饱和成 1，河床就被完全盖掉了
 2. 深水色：水的本体漫反射（`water-diffuse.png` 是这条河的蓝色）经光照后，
    再按 `_TintStrength` 拉向教程的 `_TintColor`。
    注意这一步不能省：URP 的前向不透明纹理里**没有水面自己**，只靠折射得到的是河床色，
    水就会发灰
-3. 反射：沿反射方向在深度缓冲里步进（`_SSRMaxDistance` 8、`_SSRResolution` 0.3、
-   `_SSRSteps` 5、`_SSRThickness` 0.5，与教程一致），命中后按粗糙度混合模糊副本；
-   屏幕空间反射**看不到天空**（深度缓冲里没有天空），所以掠射角用 `_ReflectionFallback`
-   （场景天空色）兜底
-4. 泡沫：`1 - 水深/`_FoamDepth`` 经 ease-in/out 后乘上流动的泡沫图案
+3. 反射：两层。
+   - 环境反射打底：`GlossyEnvironmentReflection`，URP 每帧把
+     `ReflectionProbe.defaultTexture`（Lighting 里由 **skybox** 生成的默认反射立方图）
+     喂进来，所以天空盒会正确出现在水面上
+   - 屏幕空间反射覆盖：沿反射方向在深度缓冲里步进（`_SSRMaxDistance` 8、
+     `_SSRResolution` 0.3、`_SSRSteps` 5、`_SSRThickness` 0.5，与教程一致），
+     命中磨坊/树/岸这些几何时按粗糙度混合模糊副本
+
+   为什么必须两层：屏幕空间反射**永远看不到天空**——它沿深度缓冲步进，而天空没有深度。
+   这也是俯视水面时看到的主要是环境反射、低视角掠过水面时才出现 SSR 的原因。
+4. 泡沫：`1 - 水深/_FoamDepth` 经 ease-in/out 后乘上流动的泡沫图案，
+   图案再用 `_FoamThreshold` 做 smoothstep 阈值化（原图平均亮度只有 0.26，
+   不阈值化就是一层灰雾而不是泡沫）
 5. 高光：Blinn-Phong，菲涅尔把高光颜色推向白色
 
 ### 这条河的现实约束
 
 磨坊模型的河床是 y = -2.05 的一块**平整平面**，水面在 y = 1，水深恒为 3.05。所以：
 
-- 开阔水面不会出泡沫（`1 - 3.05/1.5` 恒小于 0）。泡沫只出现在**几何体穿过水面**的位置，
-  水车和码头都穿过 y = 1，那里会出现泡沫环。想往开阔水面推泡沫就调大 `_FoamDepth`，
-  但它会变成一层均匀白雾，不是岸线泡沫。
-- 水面反射的是天空那一侧，SSR 打不到，主要靠 `_ReflectionFallback` 表现。
+- 泡沫只出现在**几何体穿过水面**的位置（水车、码头都穿过 y = 1），开阔水面恒为深水。
+  想要整条河都铺流动泡沫，把 `_FoamDepth` 从 1.5 往上调；注意 ease 曲线在浅处近似
+  平方，所以小步调没用，要调就调到 6 附近才明显。
+- 俯视时水面反射的是天空那一侧，SSR 打不到，这部分由环境反射（skybox）负责；
+  低视角掠过水面时才会看到磨坊和树的 SSR 倒影。
 
 流动法线来自流动图（`water-flow.png`，即教程的 up-flow.png）：
 法线贴图沿着流动图给出的方向随时间滚动，和教程 normal.frag 一样。
@@ -95,12 +112,40 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 2. 首次使用：菜单栏 3DGameShaders -> Build Demo Scene
 3. 若场景里没有模型：菜单栏 3DGameShaders -> Add Mill Scene Model
 4. 水面：菜单栏 3DGameShaders -> Setup Screen Space Water（会自动保存场景）
-5. 点 Play
+5. 音效/粒子/交互：菜单栏 3DGameShaders -> Setup Demo Extras (Audio, Particles, Controls)
+6. 点 Play，按 F1 显隐效果面板
 
-## 下一阶段建议
+## 教程控件对照
 
-- 水面 SSR 目前逐像素步进，可改成半分辨率 + 时域重投影降开销
-- 折射是单次偏移采样，可升级成和反射同源的屏幕空间折射步进
-- 需要水体回读时可补 Deferred GBuffer 路径
+和原教程 `running-the-demo` 一致，Play 模式下可用：
+
+| 按键 | 作用 |
+|---|---|
+| 左键拖拽 / 右键拖拽 / 滚轮 | 旋转 / 平移 / 缩放相机 |
+| w a s d / z x / 方向键 | 旋转与移动相机（OrbitCamera） |
+| 中键 | 设置色差焦点 |
+| 1 / 2 / `/` | 正午 / 午夜 / 太阳动画 |
+| 3 / 4 / 8 / O / 0 | 菲涅尔 / Rim / 卡通着色 / 法线贴图 / Phong⇄Blinn |
+| Y U I P H J K L N | SSAO / 描边 / Bloom / 雾 / 景深 / 海报化 / 像素化 / 锐化 / 胶片颗粒 |
+| 6 / 7 / 9 / `\` | 运动模糊 / Kuwahara 水彩 / LUT / 色差 |
+| M / `,` / `.` | 水面反射 / 折射 / 流动贴图 |
+| `-` `=`（含 Shift 反向） | 泡沫深度 / 折射偏移 |
+| `[` `]`（含 Shift 反向） | 雾的 near / far |
+| 5 / Delete | 烟雾粒子 / 声音 |
+| F1 | 显隐屏幕控件面板 |
+
+面板里每一项都可以直接用鼠标点选，参数用滑杆拖。
+
+## 与原教程的差异
+
+原教程有一台“帧缓冲查看器”（Tab 键循环 38 张中间缓冲）。Unity 侧没有照搬：
+那条管线把水面、烟雾、反射、折射各自写进独立的 G-buffer 层，而我们是在前向渲染里
+就地算完的，硬做出一堆同名缓冲只是假象。其余效果都已经对应实现。
+
+另外这些没有移植：
+
+- Deferred GBuffer 路径（架构差异，见水面一节）
+- 太阳落山时开合的百叶窗动画（需要额外的骨骼/动画数据）
+- 原教程水面在雾里的特殊烟雾遮罩处理
 
 注意：贴图仅用于本地学习（原仓库仅 .cxx/.vert/.frag 开放 BSD 许可）。

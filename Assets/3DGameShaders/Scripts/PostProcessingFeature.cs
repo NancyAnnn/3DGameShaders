@@ -46,6 +46,10 @@ public sealed class PostProcessingFeature : ScriptableRendererFeature
         public float ssrResolution = 0.3f;
         public float ssrSteps = 5f;
 
+        [Header("Painterly (Kuwahara)")]
+        public bool kuwaharaEnabled = false;
+        public float kuwaharaSize = 3f;
+
         [Header("Pixelize")]
         public bool pixelizeEnabled = false;
         public float pixelSize = 8f;
@@ -95,8 +99,12 @@ public sealed class PostProcessingFeature : ScriptableRendererFeature
 
     private PostPass m_Pass;
 
+    // Runtime handle for the demo's effect switches (see DemoEffectsController).
+    public static PostProcessingFeature Instance { get; private set; }
+
     public override void Create()
     {
+        Instance = this;
         m_Pass = new PostPass(settings);
     }
 
@@ -127,6 +135,7 @@ public sealed class PostProcessingFeature : ScriptableRendererFeature
         private const int PassMotionBlur = 13;
         private const int PassDOFMix = 14;
         private const int PassSSR = 16;
+        private const int PassKuwahara = 17;
         private const int PassFinal = 15;
 
         private static readonly int BloomTextureId = Shader.PropertyToID("_BloomTexture");
@@ -222,6 +231,9 @@ public sealed class PostProcessingFeature : ScriptableRendererFeature
             material.SetFloat("_SSRResolution", Mathf.Clamp(m_Settings.ssrResolution, 0.01f, 1f));
             material.SetFloat("_SSRSteps", Mathf.Max(1f, m_Settings.ssrSteps));
 
+            material.SetFloat("_UseKuwahara", m_Settings.kuwaharaEnabled ? 1f : 0f);
+            material.SetFloat("_KuwaharaSize", Mathf.Clamp(m_Settings.kuwaharaSize, 0f, 5f));
+
             material.SetFloat("_UsePixelize", m_Settings.pixelizeEnabled ? 1f : 0f);
             material.SetFloat("_PixelSize", Mathf.Max(1f, m_Settings.pixelSize));
 
@@ -290,6 +302,12 @@ public sealed class PostProcessingFeature : ScriptableRendererFeature
             if (m_Settings.ssrEnabled)
             {
                 BlitAndSwap(cmd, ref cur, ref tmp, material, PassSSR);
+            }
+
+            // Painterly (Kuwahara) filter, before the Phase 2 chain.
+            if (m_Settings.kuwaharaEnabled)
+            {
+                BlitAndSwap(cmd, ref cur, ref tmp, material, PassKuwahara);
             }
 
             // Phase 2 chain.

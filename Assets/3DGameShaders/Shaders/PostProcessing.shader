@@ -60,6 +60,9 @@ Shader "Hidden/3DGameShaders/PostProcessing"
         _SSRResolution  ("SSR Resolution",  Range(0.05, 1)) = 0.3
         _SSRSteps       ("SSR Binary Steps", Range(1, 10)) = 5
 
+        _UseKuwahara    ("Painterly (Kuwahara)", Float) = 0
+        _KuwaharaSize   ("Kuwahara Size",   Range(0, 5)) = 3
+
         _UseGamma       ("Gamma",           Float) = 0
         _Gamma          ("Gamma Value",     Range(0.2, 4)) = 1.0
         _UseLUT         ("Lookup Table",    Float) = 1
@@ -849,6 +852,105 @@ Shader "Hidden/3DGameShaders/PostProcessing"
                 }
 
                 return half4(color, 1.0);
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "Kuwahara"
+            HLSLPROGRAM
+            #pragma vertex Vert
+            #pragma fragment Kuwahara
+            #pragma target 4.5
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
+
+            float _UseKuwahara;
+            float _KuwaharaSize;
+
+            static const half3 KuwaharaLuma = half3(0.3, 0.59, 0.11);
+
+            // Mean colour and luminance variance over one quadrant of the kernel.
+            // kuwahara-filter.frag picks whichever quadrant is flattest, which is
+            // what produces the painterly look: flat areas keep their colour and
+            // edges snap to one side instead of blurring across.
+            void KuwaharaQuadrant(
+                float2 uv, float2 texel, int2 from, int2 to,
+                out half3 meanColor, out float variance)
+            {
+                half3 sum = 0;
+                float sumSquared = 0;
+                float count = 0;
+
+                for (int i = from.x; i <= to.x; ++i)
+                {
+                    for (int j = from.y; j <= to.y; ++j)
+                    {
+                        half3 c = SAMPLE_TEXTURE2D_X(
+                            _BlitTexture, sampler_LinearClamp,
+                            uv + float2(i, j) * texel).rgb;
+                        float l = dot(c, KuwaharaLuma);
+                        sum += c;
+                        sumSquared += l * l;
+                        count += 1.0;
+                    }
+                }
+
+                meanColor = sum / max(count, 1.0);
+                float mean = dot(meanColor, KuwaharaLuma);
+                variance = max(sumSquared / max(count, 1.0) - mean * mean, 0.0);
+            }
+
+            half4 Kuwahara(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+                float2 uv = input.texcoord;
+                half3 center = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, uv).rgb;
+
+                int size = (int)clamp(_KuwaharaSize, 0.0, 5.0);
+                if (_UseKuwahara <= 0.5 || size <= 0)
+                {
+                    return half4(center, 1.0);
+                }
+
+                float2 texel = 1.0 / _ScreenParams.xy;
+
+                half3 mean;
+                float variance;
+                half3 best = center;
+                float bestVariance = -1.0;
+
+                // Lower left, upper right, upper left, lower right.
+                KuwaharaQuadrant(uv, texel, int2(-size, -size), int2(0, 0), mean, variance);
+                if (bestVariance < 0.0 || variance < bestVariance)
+                {
+                    best = mean;
+                    bestVariance = variance;
+                }
+
+                KuwaharaQuadrant(uv, texel, int2(0, 0), int2(size, size), mean, variance);
+                if (variance < bestVariance)
+                {
+                    best = mean;
+                    bestVariance = variance;
+                }
+
+                KuwaharaQuadrant(uv, texel, int2(-size, 0), int2(0, size), mean, variance);
+                if (variance < bestVariance)
+                {
+                    best = mean;
+                    bestVariance = variance;
+                }
+
+                KuwaharaQuadrant(uv, texel, int2(0, -size), int2(size, 0), mean, variance);
+                if (variance < bestVariance)
+                {
+                    best = mean;
+                }
+
+                return half4(best, 1.0);
             }
             ENDHLSL
         }

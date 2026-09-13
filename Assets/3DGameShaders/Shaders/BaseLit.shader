@@ -11,6 +11,11 @@ Shader "3DGameShaders/BaseLit"
         _RimStrength     ("Rim Light Strength", Range(0, 3)) = 1.2
         _AmbientStrength ("Ambient Strength", Range(0, 2)) = 0.8
         _CelShading      ("Cel Shading", Range(0, 1)) = 0
+        // Runtime toggles, matching the demo's keyboard switches.
+        _NormalMapOn     ("Normal Mapping", Range(0, 1)) = 1
+        _FresnelOn       ("Fresnel", Range(0, 1)) = 1
+        _RimOn           ("Rim Lighting", Range(0, 1)) = 1
+        _BlinnPhongOn    ("Blinn-Phong (0 = Phong)", Range(0, 1)) = 1
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
     }
 
@@ -42,6 +47,10 @@ Shader "3DGameShaders/BaseLit"
                 float  _RimStrength;
                 float  _AmbientStrength;
                 float  _CelShading;
+                float  _NormalMapOn;
+                float  _FresnelOn;
+                float  _RimOn;
+                float  _BlinnPhongOn;
             CBUFFER_END
 
             TEXTURE2D(_DiffuseMap);  SAMPLER(sampler_DiffuseMap);
@@ -86,14 +95,18 @@ Shader "3DGameShaders/BaseLit"
             {
                 half4 diffuseMap  = SAMPLE_TEXTURE2D(_DiffuseMap,  sampler_DiffuseMap,  input.uv);
                 half4 specularMap = SAMPLE_TEXTURE2D(_SpecularMap, sampler_SpecularMap, input.uv);
-                half3 normalTS    = UnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.uv));
 
-                float sgn = input.tangentWS.w * unity_WorldTransformParams.w;
-                float3 bitangentWS = cross(input.normalWS, input.tangentWS.xyz) * sgn;
-                float3 normalWS = normalize(
-                    input.tangentWS.xyz * normalTS.x +
-                    bitangentWS * normalTS.y +
-                    input.normalWS * normalTS.z);
+                float3 normalWS = normalize(input.normalWS);
+                if (_NormalMapOn > 0.5)
+                {
+                    half3 normalTS = UnpackNormal(SAMPLE_TEXTURE2D(_NormalMap, sampler_NormalMap, input.uv));
+                    float sgn = input.tangentWS.w * unity_WorldTransformParams.w;
+                    float3 bitangentWS = cross(input.normalWS, input.tangentWS.xyz) * sgn;
+                    normalWS = normalize(
+                        input.tangentWS.xyz * normalTS.x +
+                        bitangentWS * normalTS.y +
+                        input.normalWS * normalTS.z);
+                }
 
                 float3 viewDirWS = input.viewDirWS;
 
@@ -111,20 +124,40 @@ Shader "3DGameShaders/BaseLit"
                 float3 halfway = normalize(lightDir + viewDirWS);
                 float  ndh     = saturate(dot(normalWS, halfway));
                 float  shininess = max(specularMap.g, 0.01) * 127.75;
-                float  specIntensity = pow(ndh, shininess);
-
-                float fresnel = pow(1.0 - saturate(dot(halfway, viewDirWS)), max(specularMap.b, 0.01) * 5.0);
-                half3 specColor = lerp(specularMap.rrr, half3(1, 1, 1), clamp(fresnel, 0.0, 1.0));
-                half3 specular = lightCol * specIntensity * specColor * specularMap.r;
-
-                half rim = 1.0 - saturate(dot(viewDirWS, normalWS));
-                if (_CelShading > 0.5)
+                float  specIntensity;
+                if (_BlinnPhongOn > 0.5)
                 {
-                    rim = smoothstep(0.3, 0.4, rim);
+                    specIntensity = pow(ndh, shininess);
                 }
                 else
                 {
-                    rim = pow(rim, 2.0) * _RimStrength;
+                    // Phong: mirror the light about the normal and compare to the eye.
+                    float3 reflectedDir = reflect(-lightDir, normalWS);
+                    specIntensity = pow(saturate(dot(reflectedDir, viewDirWS)), shininess);
+                }
+
+                float fresnel = 1.0;
+                if (_FresnelOn > 0.5)
+                {
+                    float3 fresnelBase = _BlinnPhongOn > 0.5 ? halfway : normalWS;
+                    fresnel = pow(1.0 - saturate(dot(fresnelBase, viewDirWS)),
+                                  max(specularMap.b, 0.01) * 5.0);
+                }
+                half3 specColor = lerp(specularMap.rrr, half3(1, 1, 1), clamp(fresnel, 0.0, 1.0));
+                half3 specular = lightCol * specIntensity * specColor * specularMap.r;
+
+                half rim = 0.0;
+                if (_RimOn > 0.5)
+                {
+                    rim = 1.0 - saturate(dot(viewDirWS, normalWS));
+                    if (_CelShading > 0.5)
+                    {
+                        rim = smoothstep(0.3, 0.4, rim);
+                    }
+                    else
+                    {
+                        rim = pow(rim, 2.0) * _RimStrength;
+                    }
                 }
                 half3 rimLight = rim * diffuse;
 

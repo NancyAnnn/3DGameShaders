@@ -43,6 +43,9 @@ Shader "3DGameShaders/WaterSurface"
         _TintColor          ("Deep Water Tint", Color) = (0.392, 0.537, 0.561, 1)
         _TintStrength       ("Tint Strength", Range(0, 1)) = 0.15
         _WaterDepth         ("Water Depth Max", Float) = 2
+        // How far the deep water colour may take over from the river bed. At 1
+        // the bed is gone; at 0.8 the bed still shows through the water.
+        _WaterBodyStrength  ("Water Body Strength", Range(0, 1)) = 0.8
         _RefractionStrength ("Refraction Offset (px)", Range(0, 64)) = 24
 
         [Header(Screen Space Reflection)]
@@ -53,11 +56,9 @@ Shader "3DGameShaders/WaterSurface"
         _SSRThickness       ("SSR Thickness", Range(0.01, 5)) = 0.5
         _ReflectionAmount   ("Reflection Amount", Range(0, 1)) = 0.8
         _ReflectionRoughness("Reflection Roughness", Range(0, 1)) = 0.5
-        // Screen space reflection cannot see the sky - there is no depth for it.
-        // The fallback is what a flat surface actually reflects at grazing
-        // angles, so it is set to the scene's sky colour.
-        _ReflectionFallback ("Reflection Fallback", Color) = (0.19, 0.30, 0.47, 1)
-        _FallbackStrength   ("Fallback Strength", Range(0, 1)) = 0.6
+        // Screen space reflection cannot see the sky - there is no depth for it -
+        // so the environment reflection covers everything the march misses.
+        _EnvironmentStrength("Environment Reflection", Range(0, 2)) = 0.8
 
         [Header(Foam)]
         _FoamPattern        ("Foam Pattern", 2D) = "white" {}
@@ -66,9 +67,13 @@ Shader "3DGameShaders/WaterSurface"
         // river bed is a flat plane ~3 units below the surface, so foam shows up
         // where geometry crosses the surface (water wheel, dock). Raise it to
         // push foam further out into the open water.
-        _FoamDepth          ("Foam Depth Max", Float) = 1
+        _FoamDepth          ("Foam Depth Max", Float) = 1.5
         _FoamTiling         ("Foam Tiling", Float) = 1
         _FoamIntensity      ("Foam Intensity", Range(0, 1)) = 1
+        // The raw foam pattern averages ~0.26 and reads as a flat haze, so it is
+        // thresholded into distinct patches.
+        _FoamThreshold      ("Foam Threshold", Range(0, 1)) = 0.35
+        _FoamSoftness       ("Foam Softness", Range(0.01, 1)) = 0.2
 
         [Header(Specular)]
         _SpecularMap        ("Specular Map", 2D) = "white" {}
@@ -120,6 +125,7 @@ Shader "3DGameShaders/WaterSurface"
                 float4 _TintColor;
                 float  _TintStrength;
                 float  _WaterDepth;
+                float  _WaterBodyStrength;
                 float  _RefractionStrength;
                 float  _UseSSR;
                 float  _SSRMaxDistance;
@@ -128,12 +134,13 @@ Shader "3DGameShaders/WaterSurface"
                 float  _SSRThickness;
                 float  _ReflectionAmount;
                 float  _ReflectionRoughness;
-                float4 _ReflectionFallback;
-                float  _FallbackStrength;
+                float  _EnvironmentStrength;
                 float4 _FoamColor;
                 float  _FoamDepth;
                 float  _FoamTiling;
                 float  _FoamIntensity;
+                float  _FoamThreshold;
+                float  _FoamSoftness;
                 float  _SpecularIntensity;
                 float  _Cull;
             CBUFFER_END
@@ -365,7 +372,10 @@ Shader "3DGameShaders/WaterSurface"
                 // ---------------------------------------------------------
                 float sceneEye    = SampleEyeDepth(screenUV);
                 float thickness   = max(sceneEye - surfaceEye, 0.0);
-                float depth01     = saturate(thickness / max(_WaterDepth, 0.0001));
+                // Exponential absorption rather than a clamped ratio: the mill's
+                // river is ~3 units deep everywhere, so a clamped ratio pins the
+                // result at "fully deep" and the bed disappears completely.
+                float depth01     = 1.0 - exp(-thickness / max(_WaterDepth, 0.0001));
 
                 // The water body colour: the river's own blue diffuse map, lit the
                 // same way BaseLit lights everything else. Without this the water
@@ -399,26 +409,36 @@ Shader "3DGameShaders/WaterSurface"
 
                 half3 background = SampleSceneColor(refractedUV);
                 half3 deepColor  = lerp(bodyColor, _TintColor.rgb, _TintStrength);
-                half3 color      = lerp(background, deepColor, depth01);
+                half3 color      = lerp(background, deepColor, depth01 * _WaterBodyStrength);
 
                 // ---------------------------------------------------------
                 // 2. Screen space reflection.
                 // ---------------------------------------------------------
-                half3 reflectionColor = 0.0;
-                float reflectionAlpha = 0.0;
+                float3 reflectionDirWS = reflect(-viewDirWS, normalWS);
+                float  grazing         = saturate(1.0 - dot(viewDirWS, normalWS));
+
+                // Environment reflection first. URP feeds ReflectionProbe's
+                // default texture into GlossyEnvironmentReflection every frame,
+                // and that default reflection is built from the skybox - so this
+                // is what a flat water surface actually reflects. Screen space
+                // reflection can never supply the sky: there is no depth for it.
+                half3 reflectionColor = GlossyEnvironmentReflection(
+                    reflectionDirWS, _ReflectionRoughness, 1.0);
+                float reflectionAlpha = _EnvironmentStrength * grazing;
+
+                // Screen space reflection overrides it wherever the depth buffer
+                // had geometry to hit (the mill, the trees, the banks).
                 if (_UseSSR > 0.5)
                 {
-                    float3 rayDirWS = normalize(reflect(-viewDirWS, normalWS));
-                    reflectionColor = SampleScreenSpaceReflection(
-                        input.positionWS, rayDirWS, viewDirWS, reflectionAlpha);
+                    float ssrVisibility = 0.0;
+                    half3 ssrColor = SampleScreenSpaceReflection(
+                        input.positionWS, reflectionDirWS, viewDirWS, ssrVisibility);
+                    reflectionColor = lerp(reflectionColor, ssrColor, ssrVisibility);
+                    reflectionAlpha = max(reflectionAlpha,
+                                          ssrVisibility * _ReflectionAmount);
                 }
 
-                // Grazing angles lose the screen space hit often, so a little of
-                // the sky colour keeps the silhouette from going flat.
-                float grazing = saturate(1.0 - dot(viewDirWS, normalWS));
-                half3 fallback = _ReflectionFallback.rgb * (_FallbackStrength * grazing);
-                color = lerp(color, reflectionColor + fallback,
-                             saturate(reflectionAlpha + _FallbackStrength * grazing));
+                color = lerp(color, reflectionColor, saturate(reflectionAlpha));
 
                 // ---------------------------------------------------------
                 // 3. Foam (foam.frag + foam-mask.frag). Shallow water near the
@@ -428,6 +448,9 @@ Shader "3DGameShaders/WaterSurface"
                 float  foamPattern = dot(
                     SAMPLE_TEXTURE2D(_FoamPattern, sampler_FoamPattern, foamUV).rgb,
                     float3(1.0, 1.0, 1.0)) / 3.0;
+                foamPattern = smoothstep(_FoamThreshold,
+                                         _FoamThreshold + _FoamSoftness,
+                                         foamPattern);
 
                 float foamAmount = 1.0 - saturate(thickness / max(_FoamDepth, 0.0001));
                 // Ease in/out curve from foam.frag.

@@ -47,10 +47,13 @@ Material:
     m_Floats:
     - _AmbientStrength: 0.8
     - _Cull: 0
+    - _EnvironmentStrength: 0.8
     - _FallbackStrength: 0.6
     - _FlowSpeed: 0.05
-    - _FoamDepth: 1
+    - _FoamDepth: 1.5
     - _FoamIntensity: 1
+    - _FoamSoftness: 0.2
+    - _FoamThreshold: 0.35
     - _FoamTiling: 1
     - _NormalStrength: 1
     - _NormalTiling: 1
@@ -64,6 +67,7 @@ Material:
     - _SpecularIntensity: 1
     - _TintStrength: 0.15
     - _UseSSR: 1
+    - _WaterBodyStrength: 0.8
     - _WaterDepth: 2
     m_Colors:
     - _FoamColor: {r: 0.8, g: 0.85, b: 0.92, a: 1}
