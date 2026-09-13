@@ -1,34 +1,40 @@
 3D Game Shaders - render probe report
-time        : 2026-09-13 19:46:11Z
+time        : 2026-09-13 20:06:26Z
 play mode   : True
 resolution  : 960x540
-camera      : Main Camera position=(-10.60, 13.57, -5.74) rotation=(32, 69, 0)
+camera      : Main Camera position=(-12.72, 14.01, 8.09) rotation=(36, 123, 0)
 scene       : Demo
 
 -- whole frame --
-mean rgb    : 0.486, 0.459, 0.411
-centre pixel: 0.204, 0.278, 0.184
-lower centre: 0.416, 0.286, 0.22
-upper centre: 0.565, 0.482, 0.447
+mean rgb    : 0.473, 0.434, 0.402
+centre pixel: 0.239, 0.302, 0.176
+lower centre: 0.278, 0.306, 0.173
+upper centre: 0.435, 0.294, 0.216
 
 -- water --
-coverage    : 5.433 % of the frame
-water mean  : 0.375, 0.483, 0.545   (what the water looks like)
-bed mean    : 0.371, 0.415, 0.363   (same pixels without the water)
-water/bed   : R 1.011, G 1.162, B 1.504
-mean delta  : 0.368  (0 = water invisible, 3 = water fully replaces the bed)
-foam pixels : 4.382 % brighter than the bed
+coverage    : 5.008 % of the frame
+water mean  : 0.337, 0.414, 0.464   (what the water looks like)
+bed mean    : 0.313, 0.365, 0.332   (same pixels without the water)
+water/bed   : R 1.077, G 1.134, B 1.395
+mean delta  : 0.279  (0 = water invisible, 3 = water fully replaces the bed)
+foam pixels : 1.048 % brighter than the bed
+
+-- water debug views (water pixels only) --
+foam amount : mean=0 max=0 over 25960 px
+depth factor: mean=1 max=1 over 25960 px
+reflection  : mean=0.431 max=0.678 over 25960 px
+thickness/4 : mean=1 max=1 over 25960 px
 
 -- parameters --
 water material: WaterSurface (Instance)  shader=3DGameShaders/WaterSurface
 _FlowSpeed = 1
 _WaterDepth = 2
-_WaterBodyStrength = 0.8
+_WaterBodyStrength = 0.55
 _TintStrength = 0.15
 _RefractionStrength = 24
 _UseSSR = 1
-_EnvironmentStrength = 0.8
-_FoamDepth = 1.5
+_EnvironmentStrength = 0.6
+_FoamDepth = 2.5
 _FoamThreshold = 0.35
 _FoamIntensity = 1
 post: PostProcessingFeature.Instance is null (enter play mode, or let the camera render once first)

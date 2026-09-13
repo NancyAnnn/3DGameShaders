@@ -157,7 +157,8 @@ public static class WaterSurfaceSetup
         material.SetColor("_TintColor", new Color(0.392f, 0.537f, 0.561f, 1f));
         material.SetFloat("_TintStrength", 0.15f);
         material.SetFloat("_WaterDepth", 2f);
-        material.SetFloat("_WaterBodyStrength", 0.8f);
+        // Clearer water: the body colour replaces less of the river bed.
+        material.SetFloat("_WaterBodyStrength", 0.55f);
         material.SetFloat("_AmbientStrength", 0.8f);
         material.SetFloat("_RefractionStrength", 24f);
         material.SetFloat("_UseSSR", 1f);
@@ -167,12 +168,16 @@ public static class WaterSurfaceSetup
         material.SetFloat("_SSRThickness", 0.5f);
         material.SetFloat("_ReflectionAmount", 0.8f);
         material.SetFloat("_ReflectionRoughness", 0.5f);
-        material.SetFloat("_EnvironmentStrength", 0.8f);
+        material.SetFloat("_EnvironmentStrength", 0.6f);
         material.SetColor("_FoamColor", new Color(0.8f, 0.85f, 0.92f, 1f));
-        material.SetFloat("_FoamDepth", 1.5f);
+        // The bank crosses the water plane, so a wider band than the tutorial's
+        // 1.5 lets the shoreline foam actually reach the screen.
+        material.SetFloat("_FoamDepth", 2.5f);
         material.SetFloat("_FoamIntensity", 1f);
         material.SetFloat("_FoamThreshold", 0.35f);
         material.SetFloat("_FoamSoftness", 0.2f);
+        material.SetFloat("_FoamFalloff", 1.2f);
+        material.SetFloat("_DebugView", 0f);
         material.SetFloat("_SpecularIntensity", 1f);
 
         EditorUtility.SetDirty(material);

@@ -77,6 +77,14 @@ Shader "3DGameShaders/WaterSurface"
         // thresholded into distinct patches.
         _FoamThreshold      ("Foam Threshold", Range(0, 1)) = 0.35
         _FoamSoftness       ("Foam Softness", Range(0.01, 1)) = 0.2
+        // foam.frag reshapes its depth term with an ease-in/out curve that
+        // collapses to x^2 near the shore, so the foam survives only a hairline
+        // at the waterline. A gentler power keeps the band wide enough to read.
+        _FoamFalloff        ("Foam Falloff", Range(0.2, 3)) = 1.2
+
+        // 0 = shaded water, 1 = foam, 2 = depth factor, 3 = reflection, 4 = thickness.
+        // Only used by the render probe.
+        _DebugView          ("Debug View", Range(0, 4)) = 0
 
         [Header(Specular)]
         _SpecularMap        ("Specular Map", 2D) = "white" {}
@@ -144,6 +152,8 @@ Shader "3DGameShaders/WaterSurface"
                 float  _FoamIntensity;
                 float  _FoamThreshold;
                 float  _FoamSoftness;
+                float  _FoamFalloff;
+                float  _DebugView;
                 float  _SpecularIntensity;
                 float  _Cull;
             CBUFFER_END
@@ -456,9 +466,7 @@ Shader "3DGameShaders/WaterSurface"
                                          foamPattern);
 
                 float foamAmount = 1.0 - saturate(thickness / max(_FoamDepth, 0.0001));
-                // Ease in/out curve from foam.frag.
-                foamAmount = (foamAmount * foamAmount)
-                           / (2.0 * (foamAmount * foamAmount - foamAmount) + 1.0);
+                foamAmount = pow(max(foamAmount, 0.0001), max(_FoamFalloff, 0.01));
                 foamAmount = saturate(foamAmount * foamPattern * _FoamIntensity) * _FoamColor.a;
                 color = lerp(color, _FoamColor.rgb, foamAmount);
 
@@ -477,6 +485,16 @@ Shader "3DGameShaders/WaterSurface"
                                     max(specularMap.b, 0.01) * 5.0);
                 half3 specularColor = lerp(specularMap.rrr, half3(1, 1, 1), saturate(fresnel));
                 color += mainLight.color * specular * specularColor * specularMap.r;
+
+                if (_DebugView > 0.5)
+                {
+                    float view = floor(_DebugView + 0.5);
+                    if (view < 1.5) { return half4(foamAmount, 0, 0, 1); }
+                    if (view < 2.5) { return half4(depth01, 0, 0, 1); }
+                    if (view < 3.5) { return half4(saturate(reflectionAlpha), 0, 0, 1); }
+                    if (view < 4.5) { return half4(saturate(thickness * 0.25), 0, 0, 1); }
+                    return half4(saturate(1.0 - _WaterBodyStrength * depth01), 0, 0, 1);
+                }
 
                 return half4(color, 1.0);
             }

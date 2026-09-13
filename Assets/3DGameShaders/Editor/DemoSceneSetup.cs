@@ -17,12 +17,16 @@ public static class DemoSceneSetup
     private const string WaterMeshName = "water-diffuse";
     private const string WheelMeshName = "wheel-diffuse";
     private const string WheelPivotName = "WheelPivot";
+    private const string WeatherVaneName = "weather-vane-diffuse";
+    private const string WeatherVanePivotName = "WeatherVanePivot";
     private const string SmokeName = "SmokeParticles";
     private const string ControllerName = "DemoController";
 
-    // Panda3D places the smoke node at (0.47, 4.5, 8.9); converted to Unity's
-    // y-up axes that is y = 8.9, above the mill house chimney.
-    private static readonly Vector3 SmokePosition = new Vector3(0.47f, 8.9f, -4.5f);
+    // Panda3D places the smoke node at (0.47, 4.5, 8.9). In Unity's y-up axes
+    // that is (0.47, 8.9, -4.5) - but the chimney surface at that x/z reaches
+    // y = 9.40, so spawning at 8.9 buries the particles inside the roof and they
+    // rise straight through it. Spawn just above the measured chimney top.
+    private static readonly Vector3 SmokePosition = new Vector3(0.47f, 9.6f, -4.5f);
 
     [MenuItem("3DGameShaders/Setup Demo Extras (Audio, Particles, Controls)")]
     public static void SetupExtras()
@@ -41,6 +45,7 @@ public static class DemoSceneSetup
     {
         int sounds = SetupAudio();
         bool smoke = SetupSmoke(applyParticleDefaults);
+        bool vane = SetupWeatherVane();
         bool controller = SetupController();
 
         Scene scene = SceneManager.GetActiveScene();
@@ -53,7 +58,7 @@ public static class DemoSceneSetup
         }
 
         Debug.Log("3DGameShaders: demo extras set up. sounds=" + sounds
-            + " smoke=" + smoke + " controller=" + controller
+            + " smoke=" + smoke + " weatherVane=" + vane + " controller=" + controller
             + " scene=" + (saved ? "saved" : "NOT saved (leave play mode and press Ctrl+S)"));
     }
 
@@ -230,6 +235,48 @@ public static class DemoSceneSetup
     // ---------------------------------------------------------------
     // Controller: wires the runtime switches to the objects above.
     // ---------------------------------------------------------------
+    // The original loops a baked "weather-vane-shake" animation on the vane
+    // node; the OBJ carries no animation, so the vane gets a pivot on its own
+    // axle and turns in place.
+    private static bool SetupWeatherVane()
+    {
+        GameObject vane = GameObject.Find(WeatherVaneName);
+        if (vane == null)
+        {
+            return false;
+        }
+
+        if (vane.transform.parent != null && vane.transform.parent.name == WeatherVanePivotName)
+        {
+            return true;
+        }
+
+        MeshFilter filter = vane.GetComponent<MeshFilter>();
+        if (filter == null || filter.sharedMesh == null)
+        {
+            return false;
+        }
+
+        Bounds bounds = filter.sharedMesh.bounds;
+        Vector3 axle = vane.transform.TransformPoint(
+            new Vector3(bounds.center.x, bounds.min.y, bounds.center.z));
+
+        GameObject pivot = new GameObject(WeatherVanePivotName);
+        pivot.transform.SetParent(vane.transform.parent, false);
+        pivot.transform.position = axle;
+        pivot.transform.rotation = Quaternion.identity;
+
+        vane.transform.SetParent(pivot.transform, true);
+
+        if (pivot.GetComponent<WeatherVane>() == null)
+        {
+            pivot.AddComponent<WeatherVane>();
+        }
+
+        EditorUtility.SetDirty(pivot);
+        return true;
+    }
+
     private static bool SetupController()
     {
         GameObject go = GameObject.Find(ControllerName);

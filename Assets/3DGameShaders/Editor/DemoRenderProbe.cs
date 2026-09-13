@@ -65,6 +65,7 @@ public static class DemoRenderProbe
         if (withoutWater != null)
         {
             AppendWaterStats(report, withWater, withoutWater);
+            AppendDebugViews(report, camera, water, withWater, withoutWater);
         }
         else
         {
@@ -83,6 +84,81 @@ public static class DemoRenderProbe
         if (withoutWater != null)
         {
             Object.DestroyImmediate(withoutWater);
+        }
+    }
+
+    // Renders the water shader's debug views so the report says whether foam,
+    // depth, reflection and thickness are actually being computed.
+    private static void AppendDebugViews(
+        StringBuilder report, Camera camera, Renderer water,
+        Texture2D withWater, Texture2D withoutWater)
+    {
+        // The renderer's own material instance: writing to sharedMaterial while
+        // playing would modify the project asset.
+        Material material = water.material;
+        if (material == null || !material.HasProperty("_DebugView"))
+        {
+            return;
+        }
+
+        Color[] baseWith = withWater.GetPixels();
+        Color[] baseWithout = withoutWater.GetPixels();
+        int count = Mathf.Min(baseWith.Length, baseWithout.Length);
+        bool[] mask = new bool[count];
+        for (int i = 0; i < count; i++)
+        {
+            float diff = Mathf.Abs(baseWith[i].r - baseWithout[i].r)
+                       + Mathf.Abs(baseWith[i].g - baseWithout[i].g)
+                       + Mathf.Abs(baseWith[i].b - baseWithout[i].b);
+            mask[i] = diff > 0.02f;
+        }
+
+        report.AppendLine("-- water debug views (water pixels only) --");
+        for (int view = 1; view <= 4; view++)
+        {
+            material.SetFloat("_DebugView", view);
+            Texture2D debug = RenderCamera(camera);
+            if (debug == null)
+            {
+                continue;
+            }
+
+            Color[] pixels = debug.GetPixels();
+            double sum = 0;
+            float max = 0f;
+            int used = 0;
+            for (int i = 0; i < pixels.Length && i < mask.Length; i++)
+            {
+                if (!mask[i])
+                {
+                    continue;
+                }
+                float value = pixels[i].r;
+                if (value > max)
+                {
+                    max = value;
+                }
+                sum += value;
+                used++;
+            }
+
+            report.AppendLine(ViewName(view) + ": mean=" + Fmt(used > 0 ? sum / used : 0.0)
+                + " max=" + Fmt(max) + " over " + used + " px");
+            Object.DestroyImmediate(debug);
+        }
+        material.SetFloat("_DebugView", 0f);
+        report.AppendLine();
+    }
+
+    private static string ViewName(int view)
+    {
+        switch (view)
+        {
+            case 1: return "foam amount ";
+            case 2: return "depth factor";
+            case 3: return "reflection  ";
+            case 4: return "thickness/4 ";
+            default: return "view " + view + "    ";
         }
     }
 
