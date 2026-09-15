@@ -126,8 +126,11 @@ Inspector 里展开 Post Processing Feature，勾选/取消对应的 Enabled 开
 - `Main -> Start Speed` 决定飘出烟囱的初速度（默认 1.2–2.2）
 - `Main -> Gravity Modifier` 是负值（浮力），越大上升越持续
 - `Main -> Start Lifetime` 决定飘多远才消失
-- `Velocity over Lifetime` 里的 `x/y` 是持续的风与上升气流，默认 y=0.8、x=0.25，
-  想让它斜着飘得更远就加大 x
+- `Velocity over Lifetime` 是风：`Y` 是上升气流（默认 0.8），横向那一轴的曲线是
+  风速随寿命的变化。**风的方向取自河流自身**——工具会从水面网格的 UV 推导出下游的
+  世界方向（流动图是常量 (0, +0.25)，着色器按 `uv + flow × time` 采样，所以图案
+  沿 -v 移动），让烟顺着水流飘。执行时控制台会打印推导出的方向，磨坊场景应为
+  `(0.000, 0.000, 1.000)`，即世界 +Z。
 - `Emission -> Rate over Time` 控制浓度
 
 生成点高度是 `SmokeParticles` 对象的 Y 坐标，默认 **8.9**，就是教程里的高度：

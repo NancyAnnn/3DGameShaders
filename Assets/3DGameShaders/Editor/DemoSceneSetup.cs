@@ -132,12 +132,16 @@ public static class DemoSceneSetup
         }
 
         GameObject go = GameObject.Find(SmokeName);
-        if (go == null)
+        bool created = go == null;
+        if (created)
         {
             go = new GameObject(SmokeName);
+            // Unity's cone shape emits along the object's local +Z axis, so a
+            // fresh particle object needs the standard -90 tilt about X for the
+            // plume to start out going up.
+            go.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
         }
         go.transform.position = SmokePosition;
-        go.transform.rotation = Quaternion.identity;
 
         ParticleSystem particles = go.GetComponent<ParticleSystem>();
         if (particles == null)
@@ -149,6 +153,9 @@ public static class DemoSceneSetup
             // Keep whatever was tuned in the inspector.
             return true;
         }
+
+        // Reset path: restore the emission axis too.
+        go.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
 
         // Adding the component runs the default Play; stop it so the settings
         // below are what actually gets emitted.
@@ -181,12 +188,28 @@ public static class DemoSceneSetup
         ParticleSystem.VelocityOverLifetimeModule velocity = particles.velocityOverLifetime;
         velocity.enabled = true;
         velocity.space = ParticleSystemSimulationSpace.World;
-        // Straight up at the chimney mouth, leaning over further up. The roof
-        // ridge beside the chimney reaches y = 10, so drifting early would push
-        // the plume through it.
-        velocity.x = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0f, 1f, 0.45f));
-        velocity.y = new ParticleSystem.MinMaxCurve(0.8f);
-        velocity.z = new ParticleSystem.MinMaxCurve(0f);
+
+        // The plume drifts the way the water reads as flowing. The flow map is a
+        // constant (0, +0.25) in uv space and the shaders sample at
+        // "uv + flow * time", so the pattern appears to travel along -v; the
+        // river's uv-to-world mapping turns that into a world direction.
+        Vector3 downstream;
+        if (!TryGetWaterFlowDirection(out downstream))
+        {
+            downstream = Vector3.forward;   // measured value for the mill river
+            Debug.LogWarning("3DGameShaders: could not read the river uv axes, "
+                + "defaulting the smoke wind to world +Z.");
+        }
+
+        // Unity requires all three velocity curves to share one mode, so every
+        // axis is a curve here - mixing a curve with a constant throws
+        // "Particle Velocity curves must all be in the same mode".
+        velocity.x = new ParticleSystem.MinMaxCurve(1f, WindCurve(downstream.x));
+        velocity.z = new ParticleSystem.MinMaxCurve(1f, WindCurve(downstream.z));
+        velocity.y = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Constant(0f, 1f, 0.8f));
+
+        Debug.Log("3DGameShaders: smoke wind direction (down stream) = "
+            + downstream.ToString("F3"));
 
         ParticleSystem.SizeOverLifetimeModule size = particles.sizeOverLifetime;
         size.enabled = true;
@@ -216,6 +239,91 @@ public static class DemoSceneSetup
         particleRenderer.material = LoadOrCreateSmokeMaterial(smokeTexture);
 
         EditorUtility.SetDirty(particles);
+        return true;
+    }
+
+    // Wind speed along one axis over the particle's life:
+    //   birth      -> a slight lean already (0.4 against a 2.2 rise is ~10 deg)
+    //   0 .. 0.25  -> barely more while the smoke climbs out of the chimney; the
+    //                 ridge beside it reaches y = 10.05 and, at the slowest rise,
+    //                 clearing it takes about a quarter of the particle's life
+    //   0.25 .. 1  -> the lean builds steadily, ending near 47 degrees
+    private static AnimationCurve WindCurve(float alongAxis)
+    {
+        Keyframe[] keys =
+        {
+            new Keyframe(0f, 0.4f * alongAxis),
+            new Keyframe(0.25f, 0.7f * alongAxis),
+            new Keyframe(1f, 2.4f * alongAxis),
+        };
+        return new AnimationCurve(keys);
+    }
+
+    // Recovers the world direction the river's textures appear to travel in. The
+    // uv axes are linear across the flat river surface, so two vertices that
+    // share u and differ in v give the world direction of the v axis. The
+    // shaders sample at "uv + flow * time", which makes the pattern travel along
+    // -v, so downstream is the opposite of the v axis.
+    private static bool TryGetWaterFlowDirection(out Vector3 downstream)
+    {
+        downstream = Vector3.forward;
+
+        GameObject water = GameObject.Find(WaterMeshName);
+        if (water == null)
+        {
+            return false;
+        }
+
+        MeshFilter filter = water.GetComponent<MeshFilter>();
+        if (filter == null || filter.sharedMesh == null)
+        {
+            return false;
+        }
+
+        Mesh mesh = filter.sharedMesh;
+        Vector3[] vertices = mesh.vertices;
+        Vector2[] uvs = mesh.uv;
+        if (uvs == null || uvs.Length != vertices.Length)
+        {
+            return false;
+        }
+
+        float bestDeltaV = 0f;
+        int bestA = -1;
+        int bestB = -1;
+        for (int a = 0; a < uvs.Length; a++)
+        {
+            for (int b = a + 1; b < uvs.Length; b++)
+            {
+                if (Mathf.Abs(uvs[a].x - uvs[b].x) > 0.02f)
+                {
+                    continue;
+                }
+
+                float deltaV = Mathf.Abs(uvs[a].y - uvs[b].y);
+                if (deltaV > bestDeltaV)
+                {
+                    bestDeltaV = deltaV;
+                    bestA = a;
+                    bestB = b;
+                }
+            }
+        }
+
+        if (bestA < 0 || bestDeltaV < 0.2f)
+        {
+            return false;
+        }
+
+        Vector3 alongV = (vertices[bestB] - vertices[bestA])
+                       / (uvs[bestB].y - uvs[bestA].y);
+        Vector3 flat = new Vector3(-alongV.x, 0f, -alongV.z);
+        if (flat.sqrMagnitude < 1e-6f)
+        {
+            return false;
+        }
+
+        downstream = water.transform.TransformDirection(flat.normalized);
         return true;
     }
 
