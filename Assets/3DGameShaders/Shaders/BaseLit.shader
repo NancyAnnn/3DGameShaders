@@ -7,8 +7,9 @@ Shader "3DGameShaders/BaseLit"
         [NoScaleOffset] _SpecularMap ("Specular Map", 2D) = "white" {}
         _EmissionColor   ("Emission Color", Color) = (0, 0, 0, 0)
         _AmbientColor    ("Material Ambient", Color) = (1, 1, 1, 1)
-        _Shininess       ("Shininess", Range(1, 128)) = 32
-        _FresnelPower    ("Fresnel Power", Range(0, 5)) = 2
+        // Multipliers on the specular map channels (G = shininess, B = fresnel power).
+        _ShininessScale  ("Shininess Multiplier", Range(0.1, 4)) = 1
+        _FresnelPowerScale ("Fresnel Power Multiplier", Range(0.1, 4)) = 1
         _RimStrength     ("Rim Light Strength", Range(0, 3)) = 1.2
         _AmbientStrength ("Ambient Strength", Range(0, 2)) = 0.8
         _CelShading      ("Cel Shading", Range(0, 1)) = 0
@@ -53,8 +54,8 @@ Shader "3DGameShaders/BaseLit"
             CBUFFER_START(UnityPerMaterial)
                 float4 _EmissionColor;
                 float4 _AmbientColor;
-                float  _Shininess;
-                float  _FresnelPower;
+                float  _ShininessScale;
+                float  _FresnelPowerScale;
                 float  _RimStrength;
                 float  _AmbientStrength;
                 float  _CelShading;
@@ -126,7 +127,7 @@ Shader "3DGameShaders/BaseLit"
             half3 CalcSpecular(Light light, half3 normalWS, half3 viewDirWS, half4 specularMap)
             {
                 float3 halfway = normalize(light.direction + viewDirWS);
-                float shininess = max(specularMap.g, 0.01) * 127.75;
+                float shininess = max(specularMap.g, 0.01) * 127.75 * _ShininessScale;
 
                 float specIntensity;
                 if (_BlinnPhongOn > 0.5)
@@ -139,12 +140,15 @@ Shader "3DGameShaders/BaseLit"
                     specIntensity = pow(saturate(dot(reflectedDir, viewDirWS)), shininess);
                 }
 
-                float fresnel = 1.0;
+                // Disabled fresnel = no white push: the specular colour stays the
+                // specular map's red channel, exactly like base.frag when
+                // fresnelEnabled is zero.
+                float fresnel = 0.0;
                 if (_FresnelOn > 0.5)
                 {
                     float3 fresnelBase = _BlinnPhongOn > 0.5 ? halfway : normalWS;
                     fresnel = pow(1.0 - saturate(dot(fresnelBase, viewDirWS)),
-                                  max(specularMap.b, 0.01) * 5.0);
+                                  max(specularMap.b, 0.01) * 5.0 * _FresnelPowerScale);
                 }
 
                 half3 specColor = lerp(specularMap.rrr, half3(1, 1, 1), clamp(fresnel, 0.0, 1.0));

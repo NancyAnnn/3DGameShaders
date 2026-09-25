@@ -376,6 +376,10 @@ public sealed class DemoEffectsController : MonoBehaviour
             material.SetFloat("_BlinnPhongOn", m_BlinnPhong ? 1f : 0f);
             material.SetFloat("_CelShading", m_CelShading ? 1f : 0f);
         }
+
+        // The water surface has its own fresnel switch so the tutorial's key 3
+        // toggles it together with the opaque materials.
+        SetWater("_FresnelOn", m_Fresnel ? 1f : 0f);
     }
 
     private void PushSoundState()

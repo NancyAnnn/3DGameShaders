@@ -14,6 +14,10 @@
 //     color  = mix(color, foam,       foamA)
 //     color += specular * specular.a
 //
+// The Schlick fresnel factor (fresnel-factor.md) drives BOTH the reflection
+// strength and the surface alpha: at grazing angles the surface reflects more
+// and hides what is behind it, facing the camera it shows more of the bed.
+//
 // This shader reproduces that order on the water mesh itself. The screen space
 // inputs the G-buffer used to supply come from the camera textures instead:
 //   * scene depth   -> water thickness, foam, and the SSR march
@@ -63,6 +67,22 @@ Shader "3DGameShaders/WaterSurface"
         // so the environment reflection covers everything the march misses.
         _EnvironmentStrength("Environment Reflection", Range(0, 2)) = 0.8
 
+        [Header(Screen Space Masks)]
+        // The tutorial renders the water into its own G-buffer and writes two mask
+        // textures next to the position and normal (geometry-buffer-1.frag):
+        //   reflectionMask = p3d_Texture3, refractionMask = p3d_Texture4
+        // and the screen space passes early out when a mask is zero
+        // (refraction.frag returns the untouched background). water-lp uses
+        // reflection-refraction.png - a flat (204,128,0) = amount 0.8, roughness 0.5 -
+        // while the channel caps and the river bed use blank.png (black), which is
+        // what keeps them out of the water effect entirely.
+        // R = reflection amount, G = roughness.
+        _ReflectionMaskMap  ("Reflection Mask (R amount, G roughness)", 2D) = "white" {}
+        // R gates the refraction offset and the deep water tint.
+        _RefractionMaskMap  ("Refraction Mask (R amount)", 2D) = "white" {}
+        // 0 ignores both masks (the behaviour before they were wired up).
+        _UseMasks           ("Use Masks", Range(0, 1)) = 1
+
         [Header(Foam)]
         _FoamPattern        ("Foam Pattern", 2D) = "white" {}
         _FoamColor          ("Foam Color", Color) = (0.8, 0.85, 0.92, 1)
@@ -89,6 +109,19 @@ Shader "3DGameShaders/WaterSurface"
         [Header(Specular)]
         _SpecularMap        ("Specular Map", 2D) = "white" {}
         _SpecularIntensity  ("Specular Intensity", Range(0, 4)) = 1
+
+        [Header(Fresnel)]
+        // The tutorial's global fresnel switch (key 3). Zero turns off the angle
+        // dependent whitening, the reflection modulation and the alpha modulation.
+        _FresnelOn          ("Fresnel", Range(0, 1)) = 1
+        // specularMap.b * MAX_FRESNEL_POWER(5) * this multiplier.
+        _FresnelPowerScale  ("Fresnel Power Multiplier", Range(0.1, 4)) = 1
+        // 1 = reflections are fully fresnel driven, 0 = ignore fresnel.
+        _FresnelReflection  ("Fresnel Reflection Strength", Range(0, 1)) = 1
+        // Surface alpha when looking straight at the water (fresnel = 0) and at
+        // grazing angles (fresnel = 1). Lower the first one to see the bed.
+        _FresnelAlphaMin    ("Fresnel Alpha (facing)", Range(0, 1)) = 0.85
+        _FresnelAlphaMax    ("Fresnel Alpha (grazing)", Range(0, 1)) = 1
 
         // The mill geometry is parsed straight out of the OBJ, so the winding is
         // not guaranteed. The other mill materials render two sided for the same
@@ -146,6 +179,7 @@ Shader "3DGameShaders/WaterSurface"
                 float  _ReflectionAmount;
                 float  _ReflectionRoughness;
                 float  _EnvironmentStrength;
+                float  _UseMasks;
                 float4 _FoamColor;
                 float  _FoamDepth;
                 float  _FoamTiling;
@@ -155,6 +189,12 @@ Shader "3DGameShaders/WaterSurface"
                 float  _FoamFalloff;
                 float  _DebugView;
                 float  _SpecularIntensity;
+                // Fresnel factor (fresnel-factor.md).
+                float  _FresnelOn;
+                float  _FresnelPowerScale;
+                float  _FresnelReflection;
+                float  _FresnelAlphaMin;
+                float  _FresnelAlphaMax;
                 float  _Cull;
             CBUFFER_END
 
@@ -162,6 +202,8 @@ Shader "3DGameShaders/WaterSurface"
             TEXTURE2D(_FlowMap);     SAMPLER(sampler_FlowMap);
             TEXTURE2D(_FoamPattern); SAMPLER(sampler_FoamPattern);
             TEXTURE2D(_SpecularMap); SAMPLER(sampler_SpecularMap);
+            TEXTURE2D(_ReflectionMaskMap); SAMPLER(sampler_ReflectionMaskMap);
+            TEXTURE2D(_RefractionMaskMap); SAMPLER(sampler_RefractionMaskMap);
             TEXTURE2D(_DiffuseMap);  SAMPLER(sampler_DiffuseMap);
 
             struct Attributes
@@ -231,7 +273,7 @@ Shader "3DGameShaders/WaterSurface"
 
             // reflection-color.frag mixes the sharp reflection with a blurred copy
             // by the roughness in the water mask (green channel = 0.5).
-            half3 SampleBlurredSceneColor(float2 uv, float blurPixels)
+            half3 SampleBlurredSceneColor(float2 uv, float blurPixels, float roughness)
             {
                 half3 color = SampleSceneColorLod0(uv);
                 if (blurPixels > 0.01)
@@ -241,7 +283,7 @@ Shader "3DGameShaders/WaterSurface"
                     blurred      += SampleSceneColorLod0(uv + float2(-texel.x,  texel.y)) * 0.25;
                     blurred      += SampleSceneColorLod0(uv + float2( texel.x, -texel.y)) * 0.25;
                     blurred      += SampleSceneColorLod0(uv + float2(-texel.x, -texel.y)) * 0.25;
-                    color = lerp(color, blurred, saturate(_ReflectionRoughness));
+                    color = lerp(color, blurred, saturate(roughness));
                 }
                 return color;
             }
@@ -253,6 +295,8 @@ Shader "3DGameShaders/WaterSurface"
                 float3 positionWS,
                 float3 rayDirWS,
                 float3 viewDirWS,
+                float reflectionAmount,
+                float reflectionRoughness,
                 out float visibility)
             {
                 visibility = 0.0;
@@ -344,10 +388,9 @@ Shader "3DGameShaders/WaterSurface"
                       hit
                     * (1.0 - max(dot(-viewDirWS, rayDirWS), 0.0))
                     * (1.0 - saturate(depthDiff / thickness))
-                    * (1.0 - saturate(length(hitPos - positionWS) / maxDistance))
-                    * _ReflectionAmount);
+                    * (1.0 - saturate(length(hitPos - positionWS) / maxDistance)));
 
-                return SampleBlurredSceneColor(hitUV, _ReflectionRoughness * 8.0);
+                return SampleBlurredSceneColor(hitUV, reflectionRoughness * 8.0, reflectionRoughness);
             }
 
             half4 frag(Varyings input) : SV_Target
@@ -355,6 +398,24 @@ Shader "3DGameShaders/WaterSurface"
                 float2 screenUV   = input.screenPos.xy / input.screenPos.w;
                 float  surfaceEye = -TransformWorldToView(input.positionWS).z;
                 float  time       = _Time.y;
+
+                // G-buffer masks (geometry-buffer-1.frag). The reflection mask's red
+                // channel scales the reflection and its green channel is the
+                // roughness; the refraction mask's red channel gates the refraction
+                // and the deep water tint, exactly like refraction.frag's early out.
+                half4 reflectionMaskTex = SAMPLE_TEXTURE2D(
+                    _ReflectionMaskMap, sampler_ReflectionMaskMap, input.uv);
+                half4 refractionMaskTex = SAMPLE_TEXTURE2D(
+                    _RefractionMaskMap, sampler_RefractionMaskMap, input.uv);
+                if (_UseMasks < 0.5)
+                {
+                    reflectionMaskTex = half4(1, 1, 1, 1);
+                    refractionMaskTex = half4(1, 1, 1, 1);
+                }
+                // The sliders are now multipliers on the mask values.
+                float reflectionAmount    = reflectionMaskTex.r * _ReflectionAmount;
+                float reflectionRoughness = reflectionMaskTex.g * _ReflectionRoughness;
+                float refractionAmount    = refractionMaskTex.r;
 
                 // ---------------------------------------------------------
                 // Flow mapped normal - normal.frag scrolls the normal map along
@@ -408,7 +469,7 @@ Shader "3DGameShaders/WaterSurface"
                 //    tinted towards the deep colour by the water depth.
                 // ---------------------------------------------------------
                 float3 viewNormal  = TransformWorldToViewDir(normalWS);
-                float  offsetPixels = _RefractionStrength * lerp(0.35, 1.0, depth01);
+                float  offsetPixels = _RefractionStrength * refractionAmount * lerp(0.35, 1.0, depth01);
                 float2 refractedUV  = screenUV + viewNormal.xy * offsetPixels / _ScreenParams.xy;
                 refractedUV = clamp(refractedUV, 0.001, 0.999);
 
@@ -422,13 +483,38 @@ Shader "3DGameShaders/WaterSurface"
 
                 half3 background = SampleSceneColor(refractedUV);
                 half3 deepColor  = lerp(bodyColor, _TintColor.rgb, _TintStrength);
-                half3 color      = lerp(background, deepColor, depth01 * _WaterBodyStrength);
+                half3 color      = lerp(background, deepColor,
+                                        depth01 * _WaterBodyStrength * refractionAmount);
+
+                // ---------------------------------------------------------
+                // Schlick fresnel factor (fresnel-factor.md).
+                //   fresnel = pow(1 - dot(base, eye), power)
+                // The base is the halfway vector (Blinn-Phong) and the power is
+                // the specular map's blue channel times MAX_FRESNEL_POWER (5),
+                // scaled by the slider. It drives both the reflection strength
+                // and the surface alpha below.
+                // ---------------------------------------------------------
+                half4  specularMap = SAMPLE_TEXTURE2D(_SpecularMap, sampler_SpecularMap, input.uv);
+                float3 halfwayDir  = normalize(mainLight.direction + viewDirWS);
+                float  fresnelPower = max(specularMap.b, 0.01) * 5.0 * _FresnelPowerScale;
+
+                // _FresnelOn = 0 falls back to the no fresnel behaviour: no white
+                // push, no reflection modulation and a constant opaque alpha, which
+                // matches base.frag when fresnelEnabled is zero.
+                float fresnel           = 0.0;
+                float fresnelReflection = 1.0;
+                float fresnelAlpha      = 1.0;
+                if (_FresnelOn > 0.5)
+                {
+                    fresnel           = pow(1.0 - saturate(dot(halfwayDir, viewDirWS)), fresnelPower);
+                    fresnelReflection = lerp(1.0, fresnel, _FresnelReflection);
+                    fresnelAlpha      = lerp(_FresnelAlphaMin, _FresnelAlphaMax, fresnel);
+                }
 
                 // ---------------------------------------------------------
                 // 2. Screen space reflection.
                 // ---------------------------------------------------------
                 float3 reflectionDirWS = reflect(-viewDirWS, normalWS);
-                float  grazing         = saturate(1.0 - dot(viewDirWS, normalWS));
 
                 // Environment reflection first. URP feeds ReflectionProbe's
                 // default texture into GlossyEnvironmentReflection every frame,
@@ -436,8 +522,8 @@ Shader "3DGameShaders/WaterSurface"
                 // is what a flat water surface actually reflects. Screen space
                 // reflection can never supply the sky: there is no depth for it.
                 half3 reflectionColor = GlossyEnvironmentReflection(
-                    reflectionDirWS, _ReflectionRoughness, 1.0);
-                float reflectionAlpha = _EnvironmentStrength * grazing;
+                    reflectionDirWS, reflectionRoughness, 1.0);
+                float reflectionAlpha = _EnvironmentStrength * fresnelReflection * reflectionAmount;
 
                 // Screen space reflection overrides it wherever the depth buffer
                 // had geometry to hit (the mill, the trees, the banks).
@@ -445,10 +531,11 @@ Shader "3DGameShaders/WaterSurface"
                 {
                     float ssrVisibility = 0.0;
                     half3 ssrColor = SampleScreenSpaceReflection(
-                        input.positionWS, reflectionDirWS, viewDirWS, ssrVisibility);
+                        input.positionWS, reflectionDirWS, viewDirWS,
+                        reflectionAmount, reflectionRoughness, ssrVisibility);
                     reflectionColor = lerp(reflectionColor, ssrColor, ssrVisibility);
                     reflectionAlpha = max(reflectionAlpha,
-                                          ssrVisibility * _ReflectionAmount);
+                                          ssrVisibility * reflectionAmount * fresnelReflection);
                 }
 
                 color = lerp(color, reflectionColor, saturate(reflectionAlpha));
@@ -475,14 +562,11 @@ Shader "3DGameShaders/WaterSurface"
                 //    base-combine.frag does. The fresnel factor tints the
                 //    specular colour towards white at grazing angles.
                 // ---------------------------------------------------------
-                half4 specularMap = SAMPLE_TEXTURE2D(_SpecularMap, sampler_SpecularMap, input.uv);
-                float3 halfwayDir = normalize(mainLight.direction + viewDirWS);
                 float  ndh        = saturate(dot(normalWS, halfwayDir));
                 float  shininess  = max(specularMap.g, 0.01) * 127.75;
                 float  specular   = pow(ndh, shininess) * _SpecularIntensity;
 
-                float fresnel = pow(1.0 - saturate(dot(halfwayDir, viewDirWS)),
-                                    max(specularMap.b, 0.01) * 5.0);
+                // The fresnel factor computed above tints the specular colour.
                 half3 specularColor = lerp(specularMap.rrr, half3(1, 1, 1), saturate(fresnel));
                 color += mainLight.color * specular * specularColor * specularMap.r;
 
@@ -496,7 +580,7 @@ Shader "3DGameShaders/WaterSurface"
                     return half4(saturate(1.0 - _WaterBodyStrength * depth01), 0, 0, 1);
                 }
 
-                return half4(color, 1.0);
+                return half4(color, saturate(fresnelAlpha));
             }
             ENDHLSL
         }

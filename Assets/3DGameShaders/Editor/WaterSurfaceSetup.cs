@@ -143,6 +143,7 @@ public static class WaterSurfaceSetup
         material.SetTexture("_FlowMap", LoadTexture("water-flow.png"));
         material.SetTexture("_FoamPattern", LoadTexture("foam-pattern.png"));
         material.SetTexture("_SpecularMap", LoadTexture("water-specular.png"));
+        AssignWaterMasks(material);
 
         if (!created && !applyDefaults)
         {
@@ -166,8 +167,10 @@ public static class WaterSurfaceSetup
         material.SetFloat("_SSRResolution", 0.3f);
         material.SetFloat("_SSRSteps", 5f);
         material.SetFloat("_SSRThickness", 0.5f);
-        material.SetFloat("_ReflectionAmount", 0.8f);
-        material.SetFloat("_ReflectionRoughness", 0.5f);
+        // The masks carry the tutorial's 0.8 amount and 0.5 roughness, so these
+        // sliders act as multipliers on top of them.
+        material.SetFloat("_ReflectionAmount", 1f);
+        material.SetFloat("_ReflectionRoughness", 1f);
         material.SetFloat("_EnvironmentStrength", 0.6f);
         material.SetColor("_FoamColor", new Color(0.8f, 0.85f, 0.92f, 1f));
         // The bank crosses the water plane, so a wider band than the tutorial's
@@ -187,6 +190,56 @@ public static class WaterSurfaceSetup
     // The tutorial spins the wheel at -90 deg/s around its axle. The parsed OBJ
     // mesh has its transform origin at the world origin, so a pivot is inserted
     // on the wheel's own bounds centre and the wheel is parented under it.
+    // geometry-buffer-1.frag writes the water's masks into the G-buffer next to the
+    // position and normal: water-lp uses reflection-refraction.png for both the
+    // reflection and the refraction stage (a flat texture whose red channel is the
+    // reflection amount 0.8 and whose green channel is the water roughness 0.5),
+    // while the channel caps and the river bed use blank.png - black - which is what
+    // keeps those meshes out of the water effect entirely.
+    public static void AssignWaterMasks(Material material)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        SetMaskImportSettings();
+
+        Texture2D mask = LoadTexture("reflection-refraction.png");
+        material.SetTexture("_ReflectionMaskMap", mask);
+        material.SetTexture("_RefractionMaskMap", mask);
+        material.SetFloat("_UseMasks", 1f);
+        // The mask values are the tutorial's amount and roughness; these sliders
+        // stay at one so the mask is not attenuated twice.
+        material.SetFloat("_ReflectionAmount", 1f);
+        material.SetFloat("_ReflectionRoughness", 1f);
+
+        EditorUtility.SetDirty(material);
+    }
+
+    [MenuItem("3DGameShaders/Assign Water Masks")]
+    public static void AssignWaterMasksToExistingMaterial()
+    {
+        Material material = LoadOrCreateWaterMaterial();
+        AssignWaterMasks(material);
+        AssetDatabase.SaveAssets();
+        Debug.Log("3DGameShaders: reflection/refraction masks assigned to "
+            + WaterMaterialName + ".mat");
+    }
+
+    // The masks are data (channel values), not colour, so they must not go through
+    // an sRGB decode: 204/255 has to read as 0.8, not 0.6.
+    private static void SetMaskImportSettings()
+    {
+        string path = TexturesDir + "/reflection-refraction.png";
+        TextureImporter importer = AssetImporter.GetAtPath(path) as TextureImporter;
+        if (importer != null && importer.sRGBTexture)
+        {
+            importer.sRGBTexture = false;
+            importer.SaveAndReimport();
+        }
+    }
+
     private static bool SetupWaterWheel()
     {
         GameObject wheel = GameObject.Find(WheelMeshName);
